@@ -1,0 +1,62 @@
+---
+title: "Network Visuzlization"
+author: "Sunit Jain"
+date: "July 13, 2015"
+output:	html_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.height = 33.1, fig.width = 46.8, fig.retina = 4, fig.path = "Figs/",
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r install, eval=FALSE}
+install.packages("igraph", dep=T)
+install.packages("dplyr", dep=T)
+install.packages("networkD3", dep=T)
+install.packages("devtools", dep =T)
+devtools::install_github("nicolewhite/RNeo4j")
+```
+
+```{r setup}
+library(igraph)
+library(RNeo4j)
+library(networkD3)
+library(dplyr)
+
+workdir="~/Desktop/"
+setwd(workdir)
+```
+
+```{r sampleData, eval=FALSE}
+Cluster=paste("Cluster_", (1:1000), sep = "")
+PFams=rep(paste("PFam_", (1:100), sep = ""), 10)
+df=data.frame(Cluster,PFams)
+```
+
+```{r localData,eval=TRUE}
+df=read.table("clusterAnnotation.tsv", header = T, sep="\t")
+```
+
+```{r network}
+#simpleNetwork(df) %>% saveNetwork(file = 'Net1.html') # 159640 nodes!!!
+df.sample=df[sample(1:nrow(df), 1000, replace = F) ,]
+
+simpleNetwork(df.sample, zoom=T) %>% saveNetwork(file = 'Net1.html')
+```
+
+
+```{r igraph, eval=FALSE}
+g=graph.data.frame(df)
+V(g)$label=NA
+V(g)$size = betweenness(g) / (max(betweenness(g)) * .1)
+V(g)$color = "cyan"
+plot(g)
+```
+
+
+```{r testing}
+data("MisLinks")
+data("MisNodes")
+```
+
