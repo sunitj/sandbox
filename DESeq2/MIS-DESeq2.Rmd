@@ -1,0 +1,548 @@
+---
+title: "MIS-DESeq2"
+author: "Sunit Jain"
+date: "January 6, 2015"
+output:
+  pdf_document:
+    fig_crop: no
+    toc: yes
+    toc_depth: 3
+  html_document:
+    dev: svg
+    toc: yes
+    toc_depth: 3
+---
+
+\newpage
+
+## Dependencies
+If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
+
+```{r install, eval=FALSE, results='hide',  echo=FALSE}
+library("gplots")
+library("RColorBrewer")
+library("PoiClaClu")
+library("ggplot2")
+library("knitr")
+library("vioplot")
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r setup,  echo=FALSE}
+## Setup
+library("DESeq2")
+library("ReportingTools")
+workdir="/Users/sunitj/Github/sandbox/DESeq2"
+dataDir="/Users/sunitj/Github/sandbox/DESeq2/data"
+setwd(workDir)
+gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
+```
+
+## Generate a read count matrix using `htseq-count`
+Sample command:
+
+`htseq-count -f bam -r name -t CDS -o scaffold.htseq.sam -i ID -q scaffold_sortedByName.bam all_combined.gff`
+
+This command was run for each sample individually.
+
+### Merging duplicate genes
+I performed a self blast and looked at results that had a percent identity greater than 98%, query coverage greater than 96% and a minimum alignment length of 500 bases. Once I had this subset, I screened out the hits to exons since we won't be considering them for this experiment anyway. I was left with the following two gene pairs:
+
+* scaffold_344578__MIS_1109813.1  scaffold_133898__MIS_10093600.14
+* scaffold_219988__MIS_10179608.12  scaffold_555373__MIS_1172265.1
+
+that had high enough similarity based on the thresholds mentioned above that their count data needed to be merged. The perl script `mergeCounts.pl` was run on each htseq-count output individually in order to accomplish this. Here is a sample command used for one of the htseq-count outputs:
+
+`perl mergeCounts.pl -l realDuplicateGenes.list -tsv Day_1.htseqCount.tsv -o Day_1.htseqCount.merged.tsv`
+
+where, realDuplicateGenes.list contains the two gene pairs mentioned above.
+
+
+```{r readTSV, }
+### Import Count files
+sampleFiles=list.files(path=dataDir,pattern="*.htseqCount.merged.tsv", full.names=TRUE)
+```
+
+```{r conditions, }
+### Set Conditions
+sampleCondition=c(rep("Day",3),rep("Night",3))
+sampleName=c("Day_1","Day_2","Day_3", "Night_4", "Night_5", "Night_6")
+sampleTable=data.frame(sampleName = sampleName, fileName=sampleFiles, condition=sampleCondition)
+```
+
+### Import Counts into DESeq2
+Once we were satisfied with the genes and their counts. We imported the count data into DESeq2.
+```{r deseq}
+ddsHTSeq=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
+colData(ddsHTSeq)$condition<-factor(colData(ddsHTSeq)$condition, levels=c("Night","Day"))
+```
+
+\newpage
+
+## Exploring the Dataset
+### The `rlog` transformation
+Many common statistical methods for exploratory analysis of multidimensional data, especially methods for clustering and ordination (e.g., principal-component analysis and the like), work best for (at least approximately) homoskedastic data; this means that the variance of an observed quantity (here, the expression strength of a gene) does not depend on the mean. In RNA-Seq data, however, variance grows with the mean. For example, if one performs PCA (principal components analysis) directly on a matrix of normalized read counts, the result typically depends only on the few most strongly expressed genes because they show the largest absolute differences between samples. A simple and often used strategy to avoid this is to take the logarithm of the normalized count values plus a small pseudocount; however, now the genes with low counts tend to dominate the results because, due to the strong Poisson noise inherent to small count values, they show the strongest relative differences between samples.
+
+As a solution, DESeq2 offers the regularized-logarithm transformation, or rlog for short. For genes with high counts, the rlog transformation differs not much from an ordinary log2 transformation. For genes with lower counts, however, the values are shrunken towards the genes' averages across all samples. Using an empirical Bayesian prior on inter-sample differences in the form of a ridge penalty, this is done such that the rlog-transformed data are approximately homoskedastic.
+
+**Note:** the rlog transformation is provided for applications other than differential testing. For differential testing we recommend the DESeq function applied to raw counts, as described later in this workflow, which also takes into account the dependence of the variance of counts on the mean value during the dispersion estimation step.
+
+```{r rlog }
+rld <- rlog(ddsHTSeq)
+```
+
+### Sample distances
+A useful first step in an RNA-Seq analysis is often to assess overall similarity between samples: Which samples are similar to each other, which are different? Does this fit to the expectation from the experiment's design?
+We use the R function `dist` to calculate the Euclidean distance between samples. To avoid that the distance measure is dominated by a few highly variable genes, and have a roughly equal contribution from all genes, we use it on the rlog-transformed data:
+```{r dist}
+sampleDists <- dist( t( assay(rld) ) )
+sampleDists
+```
+
+We visualize the distances in a heatmap:
+
+```{r distHeat, }
+library("gplots")
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- sampleTable$sampleName
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+hc <- hclust(sampleDists)
+heatmap.2( sampleDistMatrix, Rowv=as.dendrogram(hc),
+          symm=TRUE, trace="none", col=colors,
+          margins=c(2,10), labCol=FALSE )
+```
+
+\newpage
+
+### Poisson Distance
+Another option for calculating sample distances is to use the Poisson Distance, implemented in the CRAN package PoiClaClu. Similar to the transformations offered in DESeq2, this measure of dissimilarity also takes the variance structure of counts into consideration when calculating the distances between samples. The PoissonDistance function takes the original count matrix (not normalized) with samples as rows instead of columns, so we need to transpose the counts in dds.
+```{r poissonDist}
+library("PoiClaClu")
+poisd <- PoissonDistance(t(counts(ddsHTSeq)))
+samplePoisDistMatrix <- as.matrix( poisd$dd )
+rownames(samplePoisDistMatrix) <-  sampleTable$sampleName
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+hc <- hclust(poisd$dd)
+heatmap.2( samplePoisDistMatrix, Rowv=as.dendrogram(hc),
+          symm=TRUE, trace="none", col=colors,
+          margins=c(2,10), labCol=FALSE )
+```
+
+\newpage
+
+### PCA plot
+
+Another way to visualize sample-to-sample distances is a principal-components analysis (PCA). In this ordination method, the data points (i.e., here, the samples) are projected onto the 2D plane such that they spread out in the two directions which explain most of the differences in the data. The x-axis is the direction (or principal component) which separates the data points the most. The amount of the total variance which is contained in the direction is printed in the axis label.
+```{r pca, }
+library("ggplot2")
+data = plotPCA(rld, intgroup = "condition", returnData=TRUE)
+percentVar = round(100 * attr(data, "percentVar"))
+qplot(PC1, PC2, color=name, shape=condition, data=data) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+```
+
+\newpage
+
+### MDS plot
+
+Another plot, very similar to the PCA plot, can be made using the multidimensional scaling (MDS) function in base R. This is useful when we don't have the original data, but only a matrix of distances. Here we have the MDS plot for the distances calculated from the rlog transformed counts:
+```{r mds_dist, }
+mds <- data.frame(cmdscale(sampleDistMatrix))
+mds <- cbind(mds, colData(rld))
+mds$name=sampleTable$sampleName
+mds=data.frame(mds)
+qplot(X1,X2,color=name,shape=condition,data=mds)
+```
+
+\newpage
+
+And here from the PoissonDistance:
+
+```{r mds_pd, }
+mds <- data.frame(cmdscale(samplePoisDistMatrix))
+mds <- cbind(mds, colData(ddsHTSeq))
+mds$name=sampleTable$sampleName
+mds=data.frame(mds)
+qplot(X1,X2,color=name,shape=condition,data=mds)
+```
+
+\newpage
+
+## Counts
+In order to normalise the raw counts we will start by determining the relative library sizes, or size factors for each library. For example, if the counts of the expressed genes in one sample are, on average, twice as high as in another, the size factor for the first sample should be twice as large as the one for the other sample. These size factors can be obtained with the function `estimateSizeFactors`:
+
+```{r counts, }
+dds=estimateSizeFactors(ddsHTSeq)
+sizeFactors(dds)
+```
+
+### Raw vs Normalized Counts
+Once we have this information, the normalised data is obtained by dividing each column of the count table by the corresponding size factor. We can perform this calculation by calling the function counts with a the `normalized` argument set as `TRUE`. Since we won't be normalizing this data, we'll set it as `FALSE`
+
+#### Normalized
+
+```{r counts_norm, }
+library("vioplot")
+dds.ncounts=counts(dds, normalized=TRUE)
+head(dds.ncounts)
+countData=data.frame(dds.ncounts)
+vioplot(countData$Day_1,countData$Day_2, countData$Day_3, countData$Night_4, countData$Night_5, countData$Night_6,
+        col="gold",
+        names=colnames(countData))
+title("Violin Plots for Normalized Counts")
+summary(countData)
+```
+
+\newpage
+
+#### Raw
+
+```{r counts_no_norm, }
+library("vioplot")
+dds.ncounts=counts(dds, normalized=FALSE)
+head(dds.ncounts)
+countData=data.frame(dds.ncounts)
+vioplot(countData$Day_1,countData$Day_2, countData$Day_3, countData$Night_4, countData$Night_5, countData$Night_6,
+        col="gold",
+        names=colnames(countData))
+title("Violin Plots for Raw Counts")
+summary(countData)
+```
+
+
+\newpage
+
+#### Highest Counts
+
+Here are the genes with the highest counts in each sample:
+
+##### Day1
+
+```{r count_day1 }
+countData[which.max(countData$Day_1),]
+```
+
+##### Day2
+
+```{r count_day2}
+countData[which.max(countData$Day_2),]
+```
+
+##### Day3
+
+```{r count_day3}
+countData[which.max(countData$Day_3),]
+```
+
+##### Night4
+
+```{r count_night4}
+countData[which.max(countData$Night_4),]
+```
+
+##### Night5
+
+```{r count_night5}
+countData[which.max(countData$Night_5),]
+```
+
+##### Night6
+
+```{r count_night6}
+countData[which.max(countData$Night_6),]
+```
+
+\newpage
+
+## Rank Abundance
+
+### Day Counts
+```{r day_rank}
+library("tidyr")
+library("dplyr")
+day.counts=countData[, c("Day_1","Day_2","Day_3")]
+day.counts$Name=rownames(day.counts)
+day.counts.ordered = day.counts %>% 
+  gather(Days, Counts, -Name) %>%
+  group_by(Name) %>%
+  summarise(Totals=sum(Counts), mean=mean(Counts), se=sd(Counts)/sqrt(length(Counts))) %>%
+  arrange(desc(mean))
+day.counts.ordered.top100=day.counts.ordered[1:500 ,]
+day.limits=aes(ymax=mean+se, ymin=mean-se)
+day.counts.ordered.top100$Rank = seq(length(day.counts.ordered.top100$Name))
+
+ggplot(day.counts.ordered.top100, aes(Rank,mean)) +
+  geom_point(aes(order=Rank)) + geom_errorbar(day.limits) +
+  scale_y_log10()+
+  ylab("log10 Average Counts")+
+  xlab("Top 500 Genes")
+```
+
+### Night Counts
+```{r night_rank}
+library("tidyr")
+library("dplyr")
+night.counts=countData[, c("Night_4","Night_5","Night_6")]
+night.counts$Name=rownames(night.counts)
+night.counts.ordered = night.counts %>% 
+  gather(Days, Counts, -Name) %>%
+  group_by(Name) %>%
+  summarise(Totals=sum(Counts), mean=mean(Counts), se=sd(Counts)/sqrt(length(Counts))) %>%
+  arrange(desc(mean))
+night.counts.ordered.top100=night.counts.ordered[1:500 ,]
+night.limits=aes(ymax=mean+se, ymin=mean-se)
+night.counts.ordered.top100$Rank = seq(1,length(night.counts.ordered.top100$Name))
+
+
+ggplot(night.counts.ordered.top100, aes(Rank,mean)) +
+  geom_point(aes(order=Rank)) + geom_errorbar(night.limits) +
+  scale_y_log10() +
+  ylab("log10 Average Counts")+
+  xlab("Top 500 Genes")
+```
+
+### Day vs Night
+```{r d_vs_n_rank}
+day.counts.ordered.top100$Sample="Day"
+night.counts.ordered.top100$Sample="Night"
+combined.counts=bind_rows(day.counts.ordered.top100,night.counts.ordered.top100) %>%
+  arrange(desc(mean))
+combined.counts$Rank = seq(1,length(combined.counts$Name))
+combined.limits=aes(ymax=mean+se, ymin=mean-se)
+
+ggplot(combined.counts, aes(Rank,mean, color=Sample)) +
+  geom_point(aes(order=Rank), position="jitter") + geom_errorbar(combined.limits) +
+  scale_y_log10() +
+  ylab("log10 Average Counts")+
+  xlab("Combined Top Genes")
+```
+
+```{r annotate_counts}
+annotation=read.table("all_combined.products", sep="\t", quote="")
+colnames(annotation)=c("Name", "IMG_Product","IMG_Source")
+annotation$Name=as.character(annotation$Name)
+
+combined.union=as.data.frame(union(day.counts.ordered.top100$Name,night.counts.ordered.top100$Name))
+colnames(combined.union)="Name"
+combined.union$Name=as.character(combined.union$Name)
+
+tmp.countData=countData
+tmp.countData$Name=rownames(tmp.countData)
+
+combined.union=left_join(combined.union, tmp.countData, by="Name")
+combined.union=left_join(combined.union, day.counts.ordered.top100, by="Name")
+combined.union=left_join(combined.union, night.counts.ordered.top100, by="Name")
+
+colnames(combined.union)=c("Name","Day_1","Day_2","Day_3","Night_4","Night_5","Night_6",
+                            "Day_Totals","Day_Mean","Day_SE","Day_Rank", "Del1",
+                            "Night_Totals","Night_Mean","Night_SE", "Night_Rank", "Del2")
+combined.union=subset(combined.union, select=-c(Del1,Del2))
+combined.anno=left_join(combined.union, annotation, by="Name")
+```
+
+```{r write_counts}
+write.table(combined.anno, file="combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE);
+```
+
+
+
+\newpage
+
+## Differential Expression
+
+Differential expression was calculater using the DESeq2 wrapper function over 4 processors.
+
+```{r deseq_wrapper,  }
+library("BiocParallel")
+register(MulticoreParam(4))
+dds <- DESeq(dds, parallel=T)
+```
+
+### Results
+
+As `res` is a DataFrame object, it carries metadata with information on the meaning of the columns:
+
+```{r results,  }
+res <- results(dds, parallel=T)
+mcols(res, use.names=TRUE)
+summary(res)
+```
+
+### Multiple testing
+
+Novices in high-throughput biology often assume that thresholding these p values at a low value, say 0.05, as is often done in other settings, would be appropriate – but it is not. We briefly explain why:
+There are `r sum(res$pvalue < 0.05, na.rm=TRUE)` genes with a p value below 0.05 among the `r sum(!is.na(res$pvalue))` genes, for which the test succeeded in reporting a p value.
+```{r ignore, eval=FALSE, include=FALSE}
+#Now, assume for a moment that the null hypothesis is true for all genes, i.e., no gene is affected by the treatment with dexamethasone. Then, by the definition of p value, we expect up to 5% of the genes to have a p value below 0.05. This amounts to `r floor(sum(!is.na(res$pvalue)) * 0.05)` genes. If we just considered the list of genes with a p value below 0.05 as differentially expressed, this list should therefore be expected to contain up to `r sum(!is.na(res$pvalue)) * 0.05`/`r sum(res$pvalue < 0.05, na.rm=TRUE)`=`r floor((sum(!is.na(res$pvalue)) * 0.05)/sum(res$pvalue < 0.05, na.rm=TRUE))`% false positives.
+```
+DESeq2 uses the Benjamini-Hochberg (BH) adjustment as described in the base R p.adjust function; in brief, this method calculates for each gene an adjusted p value which answers the following question: if one called significant all genes with a p value less than or equal to this gene’s p value threshold, what would be the fraction of false positives (the false discovery rate, FDR) among them (in the sense of the calculation outlined above)? These values, called the BH-adjusted p values, are given in the column padj of the res object.
+Hence, if we consider a fraction of 10% false positives acceptable, we can consider all genes with an adjusted p value below 10% = 0.1 as significant. How many such genes are there?
+
+```{r}
+sum(res$padj < 0.1, na.rm=TRUE)
+```
+
+Nothing! Infact, we get `r sum(res$padj < 0.79, na.rm=TRUE)` genes with the adjusted p-value less than or equal to `0.79` and then suddenly at `0.8` we get `r sum(res$padj < 0.8, na.rm=TRUE)`
+
+\newpage
+
+### Cook's Distance per gene
+
+```{r cooks, }
+W <- res$stat
+maxCooks <- apply(assays(dds)[["cooks"]],1,max)
+idx <- !is.na(W)
+plot(rank(W[idx]), maxCooks[idx], xlab="rank of Wald statistic",
+ylab="maximum Cook's distance per gene",
+ylim=c(0,5), cex=.4, col=rgb(0,0,0,.3))
+m <- ncol(dds)
+p <- 3
+abline(h=qf(.99, p, m - p))
+```
+
+\newpage
+
+## Diagnostic Plots
+
+### Plot Counts
+
+A quick way to visualize the counts for a particular gene is to use the plotCounts function, which takes as arguments the DESeqDataSet, a gene name, and the group over which to plot the counts.
+
+```{r plotCounts, }
+topGene <- rownames(res)[which.min(res$padj)]
+data <- plotCounts(dds, gene=topGene, intgroup="condition", returnData=TRUE)
+ggplot(data, aes(x=condition, y=count, fill=condition)) +
+  scale_y_log10() + 
+  geom_dotplot(binaxis="y", stackdir="center")
+```
+
+\newpage
+
+### MA-Plots
+
+An "MA-plot" provides a useful overview for an experiment with a two-group comparison. The log2 fold change for a particular comparison is plotted on the y-axis and the average of the counts normalized by size factor is shown on the x-axis ("M" for minus, because a log ratio is equal to log minus log, and "A" for average).
+
+```{r plotMA, }
+plotMA(res, ylim=c(-5,5))
+with(res[topGene, ], {
+  points(baseMean, log2FoldChange, col="dodgerblue", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topGene, pos=2, col="dodgerblue")
+})
+```
+
+Each gene is represented with a dot. Genes with an adjusted p-value below a threshold (here 0.1, the default) are shown in red. The DESeq2 package incorporates a prior on log2 fold changes, resulting in moderated log2 fold changes from genes with low counts and highly variable counts, as can be seen by the narrowing of spread of points on the left side of the plot. This plot demonstrates that only genes with a large average normalized count contain sufficient information to yield a significant call.
+
+\newpage
+
+### Dispersion Estimataion
+
+Whether a gene is called significant depends not only on its LFC but also on its within-group variability, which DESeq2 quantifies as the dispersion. For strongly expressed genes, the dispersion can be understood as a squared coefficient of variation: a dispersion value of 0.01 means that the gene's expression tends to differ by typically sqrt(0.01)=10% between samples of the same treatment group. For weak genes, the Poisson noise is an additional source of noise.
+
+The function plotDispEsts visualizes DESeq2's dispersion estimates:
+
+```{r disp_est, }
+dds=estimateDispersions(dds)
+plotDispEsts(dds)
+```
+
+The black points are the dispersion estimates for each gene as obtained by considering the information from each gene separately. Unless one has many samples, these values fluctuate strongly around their true values. Therefore, we fit the red trend line, which shows the dispersions' dependence on the mean, and then shrink each gene's estimate towards the red line to obtain the final estimates (blue points) that are then used in the hypothesis test. The blue circles above the main "cloud" of points are genes which have high gene-wise dispersion estimates which are labelled as dispersion outliers. These estimates are therefore not shrunk toward the fitted trend line.
+
+\newpage
+
+### P-Value Histogram
+
+Another useful diagnostic plot is the histogram of the p values.
+
+```{r pval_hist, }
+hist(res$pvalue[res$baseMean > 1], breaks=20, col="grey50", border="white")
+```
+
+\newpage
+
+## Gene clustering
+
+In the sample distance heatmap made previously, the dendrogram at the side shows us a hierarchical clustering of the samples. Such a clustering can also be performed for the genes. Since the clustering is only relevant for genes that actually carry signal, one usually carries it out only for a subset of most highly variable genes. Here, for demonstration, let us select the 50 genes with the highest variance across samples. We will work with the rlog transformed counts:
+
+```{r geneFilter, }
+library("genefilter")
+topVarGenes <- head(order(-rowVars(assay(rld))),50)
+```
+
+The heatmap becomes more interesting if we do not look at absolute expression strength but rather at the amount by which each gene deviates in a specific sample from the gene's average across all samples. Hence, we center each genes' values across samples, and plot a heatmap. We provide the column side colors to help identify the treated samples (in blue) from the untreated samples (in grey).
+
+```{r clust_heat, }
+colors <- colorRampPalette( rev(brewer.pal(9, "PuOr")) )(255)
+sidecols <- c("grey","dodgerblue")[ rld$condition ]
+mat <- assay(rld)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+heatmap.2(mat, trace="none", col=colors, ColSideColors=sidecols,
+          labRow=FALSE, mar=c(10,2), scale="row")
+```
+
+We can now see blocks of genes which covary across patients. Note that a set of genes at the top of the heatmap are separating the N061011 cell line from the others. At the bottom of the heatmap, we see a set of genes for which the treated samples have higher gene expression.
+
+```{r write, }
+resOrdered <- res[order(res$pvalue),]
+
+resOrdered$Name=rownames(resOrdered)
+head(resOrdered)
+
+resOrdered.top125=data.frame(resOrdered[1:125 ,])
+resOrdered.top125=resOrdered.top125[c(7,1:6)]
+resOrdered.top125=left_join(resOrdered.top125, tmp.countData, by="Name")
+resOrdered.top125=left_join(resOrdered.top125, day.counts.ordered, by="Name")
+resOrdered.top125=left_join(resOrdered.top125, night.counts.ordered, by="Name")
+resOrdered.top125=left_join(resOrdered.top125, annotation, by="Name")
+colnames(resOrdered.top125)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
+
+write.table(as.data.frame(resOrdered.top125), sep="\t",file="results.tsv", quote = FALSE, row.names =FALSE)
+```
+
+\newpage
+
+## Independent Filtering
+
+The MA plot highlights an important property of RNA-Seq data. For weakly expressed genes, we have no chance of seeing differential expression, because the low read counts suffer from so high Poisson noise that any biological effect is drowned in the uncertainties from the read counting. We can also show this by examining the ratio of small p values (say, less than, 0.01) for genes binned by mean normalized count:
+
+```{r iFilter}
+# create bins using the quantile function
+qs <- c(0, quantile(res$baseMean[res$baseMean > 0], 0:7/7))
+# cut the genes into the bins
+bins <- cut(res$baseMean, qs)
+# rename the levels of the bins using the middle point
+levels(bins) <- paste0("~",round(.5*qs[-1] + .5*qs[-length(qs)]))
+# calculate the ratio of $p$ values less than .01 for each bin
+ratios <- tapply(res$pvalue, bins, function(p) mean(p < .01, na.rm=TRUE))
+# plot these ratios
+barplot(ratios, xlab="mean normalized count", ylab="ratio of small p values")
+```
+
+At first sight, there may seem to be little benefit in filtering out these genes. After all, the test found them to be non-significant anyway. However, these genes have an influence on the multiple testing adjustment, whose performance improves if such genes are removed. By removing the weakly-expressed genes from the input to the FDR procedure, we can find more genes to be significant among those which we keep, and so improved the power of our test. This approach is known as independent filtering.
+
+\newpage
+
+The DESeq2 software automatically performs independent filtering which maximizes the number of genes which will have adjusted p value less than a critical value (by default, alpha is set to 0.1). This automatic independent filtering is performed by, and can be controlled by, the results function. We can observe how the number of rejections changes for various cutoffs based on mean normalized count. The following optimal threshold and table of possible values is stored as an attribute of the results object.
+
+```{r autoIFilter}
+attr(res,"filterThreshold")
+
+plot(attr(res,"filterNumRej"),type="b",
+     xlab="quantiles of 'baseMean'",
+     ylab="number of rejections")
+```
+
+The term independent highlights an important caveat. Such filtering is permissible only if the filter criterion is independent of the actual test statistic. Otherwise, the filtering would invalidate the test and consequently the assumptions of the BH procedure. This is why we filtered on the average over all samples: this filter is blind to the assignment of samples to the treatment and control group and hence independent. The independent filtering software used inside DESeq2 comes from the genefilter package, which contains a reference to a paper describing the statistical foundation for independent filtering.
+
+\newpage
+
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```
