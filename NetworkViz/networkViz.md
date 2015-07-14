@@ -2,12 +2,7 @@
 title: "Network Visuzlization"
 author: "Sunit Jain"
 date: "July 13, 2015"
-output:
-	html_document:
-    pandoc_args: [
-      "+RTS", "-K512m",
-      "-RTS"
-    ]
+output: html_document:
 ---
 
 
