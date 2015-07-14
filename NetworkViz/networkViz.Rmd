@@ -24,7 +24,7 @@ library(RNeo4j)
 library(networkD3)
 library(dplyr)
 
-workdir="~/Desktop/"
+workdir="/Users/sunitj/Github/sandbox/NetworkViz"
 setwd(workdir)
 ```
 
@@ -35,7 +35,7 @@ df=data.frame(Cluster,PFams)
 ```
 
 ```{r localData,eval=TRUE}
-df=read.table("clusterAnnotation.tsv", header = T, sep="\t")
+df=read.table("data/clusterAnnotation.tsv", header = T, sep="\t")
 ```
 
 ```{r network}
