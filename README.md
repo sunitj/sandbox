@@ -1,2 +1,2 @@
 # sandbox
-This is just a sandbox repo for stuff that I test/figure out and wish to keep a log of.
+This is a place where I test/figure out stuff and where projects live before they're mature enough for the public.*You have been warned.*
