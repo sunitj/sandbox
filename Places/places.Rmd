@@ -17,7 +17,6 @@ knitr::opts_chunk$set(fig.height = (33.1)/6,
                       message=FALSE)
 ```
 
-# Where have I been?
 ```{r install, eval=FALSE}
 install.packages("leaflet",dep=T)
 ```
