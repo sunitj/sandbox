@@ -15,12 +15,22 @@ output:
 install.packages("leaflet",dep=T)
 ```
 
-### Setup
+## Setup
 ```{r setup}
 library(leaflet)
 library(dplyr)
+library(maps)
 
 workdir="/Users/sunitj/GitHub/sandbox/Places"
 setwd(workdir)
 ```
+
+## States
+```{r states}
+mapStates = map("state", fill = TRUE, plot = FALSE)
+leaflet(mapStates) %>%
+    addTiles() %>%
+    addPolygons(fillColor = topo.colors(10, alpha = NULL), stroke = F)
+```
+
 
