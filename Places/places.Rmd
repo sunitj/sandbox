@@ -7,15 +7,21 @@ output:
         toc: yes
 ---
 
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.height = (33.1)/6,
+                      fig.width = (46.8)/6,
+                      fig.retina = 4,
+                      fig.path = "Figs",
+                      echo=FALSE,
+                      warning=FALSE,
+                      message=FALSE)
+```
+
 # Where have I been?
-
-
-## Install
 ```{r install, eval=FALSE}
 install.packages("leaflet",dep=T)
 ```
 
-## Setup
 ```{r setup}
 library(leaflet)
 library(dplyr)
@@ -25,12 +31,26 @@ workdir="/Users/sunitj/GitHub/sandbox/Places"
 setwd(workdir)
 ```
 
-## States
+## United States
 ```{r states}
-mapStates = map("state", fill = TRUE, plot = FALSE)
+been.us=c("michigan", "california", "texas", "florida","new york", "illinois", "nevada")
+mapStates = map("state", been.us,fill = TRUE, plot = FALSE)
 leaflet(mapStates) %>%
     addTiles() %>%
-    addPolygons(fillColor = topo.colors(10, alpha = NULL), stroke = F)
+    addPolygons(fill=T, color="blue",stroke = F) %>%
+    addProviderTiles("CartoDB.Positron")
 ```
+
+## World
+```{r world}
+been.world=c("usa", "india", "indonesia", "uae")
+mapWorld=map("world", been.world, fill = T, plot = F)
+leaflet(mapWorld) %>%
+    addTiles() %>%
+    addPolygons(fill=T, color="red", stroke = F) %>%
+    addProviderTiles("CartoDB.Positron")
+```
+
+
 
 
