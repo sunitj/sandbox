@@ -2,11 +2,25 @@
 title: "Place I’ve been"
 author: "Sunit Jain"
 date: "July 14, 2015"
-output: html_document
+output:
+    html_document:
+        toc: yes
 ---
 
 # Where have I been?
 
-```{r setup}
 
+## Install
+```{r install, eval=FALSE}
+install.packages("leaflet",dep=T)
 ```
+
+### Setup
+```{r setup}
+library(leaflet)
+library(dplyr)
+
+workdir="/Users/sunitj/GitHub/sandbox/Places"
+setwd(workdir)
+```
+
