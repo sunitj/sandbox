@@ -18,7 +18,7 @@ output:
 ## Dependencies
 If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 
-```{r install, eval=FALSE, results='hide',  echo=FALSE}
+```{r install, eval=FALSE, results='hide',  echo=False}
 library("gplots")
 library("RColorBrewer")
 library("PoiClaClu")
