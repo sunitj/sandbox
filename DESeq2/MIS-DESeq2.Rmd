@@ -19,13 +19,17 @@ output:
 If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 
 ```{r install, eval=FALSE, results='hide',  echo=FALSE}
-library("gplots")
-library("RColorBrewer")
-library("PoiClaClu")
-library("ggplot2")
-library("knitr")
-library("vioplot")
-library("pheatmap")
+package = function(p) {
+  if (!p %in% installed.packages()){ install.packages(p) }
+#	require(p, character.only=TRUE)
+}
+package("gplots")
+package("RColorBrewer")
+package("PoiClaClu")
+package("ggplot2")
+package("knitr")
+package("vioplot")
+package("pheatmap")
 ```
 
 ```{r global_options, include=FALSE}
