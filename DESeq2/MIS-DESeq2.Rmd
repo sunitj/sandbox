@@ -3,12 +3,12 @@ title: "MIS-DESeq2"
 author: "Sunit Jain"
 date: "January 6, 2015"
 output:
-  pdf_document:
-    fig_crop: no
-    toc: yes
-    toc_depth: 3
   html_document:
     dev: svg
+    toc: yes
+    toc_depth: 3
+  pdf_document:
+    fig_crop: no
     toc: yes
     toc_depth: 3
 ---
@@ -18,7 +18,7 @@ output:
 ## Dependencies
 If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 
-```{r install, eval=FALSE, results='hide',  echo=False}
+```{r install, eval=FALSE, results='hide',  echo=FALSE}
 library("gplots")
 library("RColorBrewer")
 library("PoiClaClu")
