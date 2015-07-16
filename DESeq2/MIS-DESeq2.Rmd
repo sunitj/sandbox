@@ -25,6 +25,7 @@ library("PoiClaClu")
 library("ggplot2")
 library("knitr")
 library("vioplot")
+library("pheatmap")
 ```
 
 ```{r global_options, include=FALSE}
@@ -35,11 +36,12 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
 ```{r setup,  echo=FALSE}
 ## Setup
 library("DESeq2")
-library("ReportingTools")
+#library("ReportingTools")
 workdir="/Users/sunitj/Github/sandbox/DESeq2"
 dataDir="/Users/sunitj/Github/sandbox/DESeq2/data"
-setwd(workDir)
+setwd(workdir)
 gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
+minRawCount=20
 ```
 
 ## Generate a read count matrix using `htseq-count`
@@ -76,10 +78,24 @@ sampleTable=data.frame(sampleName = sampleName, fileName=sampleFiles, condition=
 
 ### Import Counts into DESeq2
 Once we were satisfied with the genes and their counts. We imported the count data into DESeq2.
-```{r deseq}
-ddsHTSeq=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
-colData(ddsHTSeq)$condition<-factor(colData(ddsHTSeq)$condition, levels=c("Night","Day"))
+```{r deseq, cache=TRUE}
+ddsHTSeq.all=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
+colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=c("Night","Day"))
 ```
+
+## Reads per Sample
+```{r readsPerSample}
+apply(counts(ddsHTSeq.all), 2, sum)
+```
+
+### Filtering the data
+Get rid of genes which did not occur frequently enough. Here we say, lets get rid of genes with counts >=`r minRawCount` in at least 2 samples.
+```{r dim}
+keep=rowSums(counts(ddsHTSeq.all)>=minRawCount) >= 2
+ddsHTSeq=ddsHTSeq.all[keep ,]
+apply(counts(ddsHTSeq), 2, sum)
+```
+This reduces the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
 
 \newpage
 
@@ -106,15 +122,16 @@ sampleDists
 We visualize the distances in a heatmap:
 
 ```{r distHeat, }
-library("gplots")
 library("RColorBrewer")
+library("pheatmap")
 sampleDistMatrix <- as.matrix( sampleDists )
 rownames(sampleDistMatrix) <- sampleTable$sampleName
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 hc <- hclust(sampleDists)
-heatmap.2( sampleDistMatrix, Rowv=as.dendrogram(hc),
-          symm=TRUE, trace="none", col=colors,
-          margins=c(2,10), labCol=FALSE )
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
 ```
 
 \newpage
@@ -128,9 +145,10 @@ samplePoisDistMatrix <- as.matrix( poisd$dd )
 rownames(samplePoisDistMatrix) <-  sampleTable$sampleName
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 hc <- hclust(poisd$dd)
-heatmap.2( samplePoisDistMatrix, Rowv=as.dendrogram(hc),
-          symm=TRUE, trace="none", col=colors,
-          margins=c(2,10), labCol=FALSE )
+pheatmap(samplePoisDistMatrix,
+         clustering_distance_rows=poisd$dd,
+         clustering_distance_cols=poisd$dd,
+         col=colors)
 ```
 
 \newpage
@@ -173,7 +191,6 @@ qplot(X1,X2,color=name,shape=condition,data=mds)
 ```
 
 \newpage
-
 ## Counts
 In order to normalise the raw counts we will start by determining the relative library sizes, or size factors for each library. For example, if the counts of the expressed genes in one sample are, on average, twice as high as in another, the size factor for the first sample should be twice as large as the one for the other sample. These size factors can be obtained with the function `estimateSizeFactors`:
 
@@ -215,48 +232,6 @@ title("Violin Plots for Raw Counts")
 summary(countData)
 ```
 
-
-\newpage
-
-#### Highest Counts
-
-Here are the genes with the highest counts in each sample:
-
-##### Day1
-
-```{r count_day1 }
-countData[which.max(countData$Day_1),]
-```
-
-##### Day2
-
-```{r count_day2}
-countData[which.max(countData$Day_2),]
-```
-
-##### Day3
-
-```{r count_day3}
-countData[which.max(countData$Day_3),]
-```
-
-##### Night4
-
-```{r count_night4}
-countData[which.max(countData$Night_4),]
-```
-
-##### Night5
-
-```{r count_night5}
-countData[which.max(countData$Night_5),]
-```
-
-##### Night6
-
-```{r count_night6}
-countData[which.max(countData$Night_6),]
-```
 
 \newpage
 
@@ -323,8 +298,8 @@ ggplot(combined.counts, aes(Rank,mean, color=Sample)) +
   xlab("Combined Top Genes")
 ```
 
-```{r annotate_counts}
-annotation=read.table("all_combined.products", sep="\t", quote="")
+```{r annotate_counts, cache=TRUE}
+annotation=read.table("data/all_combined.products", sep="\t", quote="")
 colnames(annotation)=c("Name", "IMG_Product","IMG_Source")
 annotation$Name=as.character(annotation$Name)
 
@@ -347,7 +322,7 @@ combined.anno=left_join(combined.union, annotation, by="Name")
 ```
 
 ```{r write_counts}
-write.table(combined.anno, file="combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE);
+write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE);
 ```
 
 
@@ -378,9 +353,9 @@ summary(res)
 
 Novices in high-throughput biology often assume that thresholding these p values at a low value, say 0.05, as is often done in other settings, would be appropriate – but it is not. We briefly explain why:
 There are `r sum(res$pvalue < 0.05, na.rm=TRUE)` genes with a p value below 0.05 among the `r sum(!is.na(res$pvalue))` genes, for which the test succeeded in reporting a p value.
-```{r ignore, eval=FALSE, include=FALSE}
-#Now, assume for a moment that the null hypothesis is true for all genes, i.e., no gene is affected by the treatment with dexamethasone. Then, by the definition of p value, we expect up to 5% of the genes to have a p value below 0.05. This amounts to `r floor(sum(!is.na(res$pvalue)) * 0.05)` genes. If we just considered the list of genes with a p value below 0.05 as differentially expressed, this list should therefore be expected to contain up to `r sum(!is.na(res$pvalue)) * 0.05`/`r sum(res$pvalue < 0.05, na.rm=TRUE)`=`r floor((sum(!is.na(res$pvalue)) * 0.05)/sum(res$pvalue < 0.05, na.rm=TRUE))`% false positives.
-```
+
+Now, assume for a moment that the null hypothesis is true for all genes, i.e., no gene is affected by the treatment with dexamethasone. Then, by the definition of p value, we expect up to `5%` of the genes to have a p value below 0.05. This amounts to `r floor(sum(!is.na(res$pvalue)) * 0.05)` genes. If we just considered the list of genes with a p value below 0.05 as differentially expressed, this list should therefore be expected to contain up to `r sum(!is.na(res$pvalue)) * 0.05`/`r sum(res$pvalue < 0.05, na.rm=TRUE)`=`r (sum(!is.na(res$pvalue)) * 0.05)/sum(res$pvalue < 0.05, na.rm=TRUE)`% false positives.
+
 DESeq2 uses the Benjamini-Hochberg (BH) adjustment as described in the base R p.adjust function; in brief, this method calculates for each gene an adjusted p value which answers the following question: if one called significant all genes with a p value less than or equal to this gene’s p value threshold, what would be the fraction of false positives (the false discovery rate, FDR) among them (in the sense of the calculation outlined above)? These values, called the BH-adjusted p values, are given in the column padj of the res object.
 Hence, if we consider a fraction of 10% false positives acceptable, we can consider all genes with an adjusted p value below 10% = 0.1 as significant. How many such genes are there?
 
@@ -388,7 +363,17 @@ Hence, if we consider a fraction of 10% false positives acceptable, we can consi
 sum(res$padj < 0.1, na.rm=TRUE)
 ```
 
-Nothing! Infact, we get `r sum(res$padj < 0.79, na.rm=TRUE)` genes with the adjusted p-value less than or equal to `0.79` and then suddenly at `0.8` we get `r sum(res$padj < 0.8, na.rm=TRUE)`
+We subset the results table to these genes and then sort it by the log2 fold change estimate to get the significant genes with the strongest down-regulation.
+```{r}
+resSig <- subset(res, padj < 0.1)
+head(resSig[ order( resSig$log2FoldChange ), ])
+```
+
+…and with the strongest upregulation. 
+```{r}
+# The order function gives the indices in increasing order, so a simple way to ask for decreasing order is to add a - sign. Alternatively, you can use the argument decreasing=TRUE.
+head(resSig[ order( -resSig$log2FoldChange ), ])
+```
 
 \newpage
 
@@ -400,9 +385,9 @@ maxCooks <- apply(assays(dds)[["cooks"]],1,max)
 idx <- !is.na(W)
 plot(rank(W[idx]), maxCooks[idx], xlab="rank of Wald statistic",
 ylab="maximum Cook's distance per gene",
-ylim=c(0,5), cex=.4, col=rgb(0,0,0,.3))
+ylim=c(0,5), cex=.8, col=rgb(0,0,0))
 m <- ncol(dds)
-p <- 3
+p <- 2
 abline(h=qf(.99, p, m - p))
 ```
 
@@ -418,7 +403,6 @@ A quick way to visualize the counts for a particular gene is to use the plotCoun
 topGene <- rownames(res)[which.min(res$padj)]
 data <- plotCounts(dds, gene=topGene, intgroup="condition", returnData=TRUE)
 ggplot(data, aes(x=condition, y=count, fill=condition)) +
-  scale_y_log10() + 
   geom_dotplot(binaxis="y", stackdir="center")
 ```
 
@@ -432,7 +416,7 @@ An "MA-plot" provides a useful overview for an experiment with a two-group compa
 plotMA(res, ylim=c(-5,5))
 with(res[topGene, ], {
   points(baseMean, log2FoldChange, col="dodgerblue", cex=2, lwd=2)
-  text(baseMean, log2FoldChange, topGene, pos=2, col="dodgerblue")
+  text(baseMean, log2FoldChange, topGene, pos=4, col="dodgerblue")
 })
 ```
 
@@ -467,11 +451,11 @@ hist(res$pvalue[res$baseMean > 1], breaks=20, col="grey50", border="white")
 
 ## Gene clustering
 
-In the sample distance heatmap made previously, the dendrogram at the side shows us a hierarchical clustering of the samples. Such a clustering can also be performed for the genes. Since the clustering is only relevant for genes that actually carry signal, one usually carries it out only for a subset of most highly variable genes. Here, for demonstration, let us select the 50 genes with the highest variance across samples. We will work with the rlog transformed counts:
+In the sample distance heatmap made previously, the dendrogram at the side shows us a hierarchical clustering of the samples. Such a clustering can also be performed for the genes. Since the clustering is only relevant for genes that actually carry signal, one usually carries it out only for a subset of most highly variable genes. Here, for demonstration, let us select the 20 genes with the highest variance across samples. We will work with the rlog transformed counts:
 
 ```{r geneFilter, }
 library("genefilter")
-topVarGenes <- head(order(-rowVars(assay(rld))),50)
+topVarGenes <- head(order(-rowVars(assay(rld))),20)
 ```
 
 The heatmap becomes more interesting if we do not look at absolute expression strength but rather at the amount by which each gene deviates in a specific sample from the gene's average across all samples. Hence, we center each genes' values across samples, and plot a heatmap. We provide the column side colors to help identify the treated samples (in blue) from the untreated samples (in grey).
@@ -481,14 +465,19 @@ colors <- colorRampPalette( rev(brewer.pal(9, "PuOr")) )(255)
 sidecols <- c("grey","dodgerblue")[ rld$condition ]
 mat <- assay(rld)[ topVarGenes, ]
 mat <- mat - rowMeans(mat)
-heatmap.2(mat, trace="none", col=colors, ColSideColors=sidecols,
-          labRow=FALSE, mar=c(10,2), scale="row")
+#heatmap.2(mat, trace="none", col=colors, ColSideColors=sidecols,
+#          labRow=FALSE, mar=c(10,2), scale="row")
+
+mat <- assay(rld)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(rld))
+pheatmap(mat, annotation_col=df)
 ```
 
 We can now see blocks of genes which covary across patients. Note that a set of genes at the top of the heatmap are separating the N061011 cell line from the others. At the bottom of the heatmap, we see a set of genes for which the treated samples have higher gene expression.
 
 ```{r write, }
-resOrdered <- res[order(res$pvalue),]
+resOrdered <- res[order(res$padj),]
 
 resOrdered$Name=rownames(resOrdered)
 head(resOrdered)
@@ -501,7 +490,7 @@ resOrdered.top125=left_join(resOrdered.top125, night.counts.ordered, by="Name")
 resOrdered.top125=left_join(resOrdered.top125, annotation, by="Name")
 colnames(resOrdered.top125)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
 
-write.table(as.data.frame(resOrdered.top125), sep="\t",file="results.tsv", quote = FALSE, row.names =FALSE)
+write.table(as.data.frame(resOrdered.top125), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
 ```
 
 \newpage
