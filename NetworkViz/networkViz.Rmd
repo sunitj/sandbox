@@ -40,7 +40,7 @@ df=read.table("data/clusterAnnotation.tsv", header = T, sep="\t")
 
 ```{r network}
 #simpleNetwork(df) %>% saveNetwork(file = 'Net1.html') # 159640 nodes!!!
-df.sample=df[sample(1:nrow(df), 1000, replace = F) ,]
+df.sample=df[sample(1:nrow(df), 100, replace = F) ,]
 
 simpleNetwork(df.sample, zoom=T) %>% saveNetwork(file = 'Net1.html')
 ```
@@ -49,7 +49,7 @@ simpleNetwork(df.sample, zoom=T) %>% saveNetwork(file = 'Net1.html')
 ```{r igraph, eval=FALSE}
 g=graph.data.frame(df)
 V(g)$label=NA
-V(g)$size = betweenness(g) / (max(betweenness(g)) * .1)
+V(g)$size = degree(g,mode = "all")
 V(g)$color = "cyan"
 plot(g)
 ```
