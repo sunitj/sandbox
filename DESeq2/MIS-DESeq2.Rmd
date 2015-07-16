@@ -3,12 +3,12 @@ title: "MIS-DESeq2"
 author: "Sunit Jain"
 date: "January 6, 2015"
 output:
-  html_document:
-    dev: svg
-    toc: yes
-    toc_depth: 3
   pdf_document:
     fig_crop: no
+    toc: yes
+    toc_depth: 3
+  html_document:
+    dev: svg
     toc: yes
     toc_depth: 3
 ---
