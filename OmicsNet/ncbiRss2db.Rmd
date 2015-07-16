@@ -5,22 +5,30 @@ date: "July 16, 2015"
 output: html_document
 ---
 ```{r dependencies}
-install.packages("XML")
-
+package = function(p) {
+	if (!p %in% installed.packages()){ install.packages(p) }
+#	require(p, character.only=TRUE)
+}
+package("XML")
+package
+# http://www.r-bloggers.com/how-to-download-complete-xml-records-from-pubmed-and-extract-data/
 ```
 
 ```{r setup}
 workdir="/Users/sunitj/Github/sandbox/OmicsNet"
 setwd(workdir)
-library(XML)
-xml=xmlTreeParse("http://www.ncbi.nlm.nih.gov/entrez/eutils/erss.cgi?rss_guid=18ervbTh5APXvdeErcztvCKsr9OQiih79YXqPknvMYRqWSUcQP",
-								 isURL = TRUE,
-								 useInternalNodes = TRUE))
 ```
 
-```{r}
-mySrc=xpathApply(xmlRoot(xml), "//item")
+```{r xml}
+library(XML)
+xml.file="data/ncbi_metaomics.xml"
 
+# Parse XML into XML Tree
+xml.data <- xmlTreeParse(xml.file, useInternalNodes = TRUE)
+pub.count=length(names(top))
+# Use xpathSApply to extract Journal name
+journal <- sapply(c("//LastName", "//ForeName", "//ISOAbbreviation"), xpathApply, doc = doc, fun = xmlValue)
+df <- data.frame(journal)
 ```
 
 
