@@ -1,0 +1,26 @@
+---
+title: "Meta*omics Network"
+author: "Sunit Jain"
+date: "July 16, 2015"
+output: html_document
+---
+```{r dependencies}
+install.packages("XML")
+
+```
+
+```{r setup}
+workdir="/Users/sunitj/Github/sandbox/OmicsNet"
+setwd(workdir)
+library(XML)
+xml=xmlTreeParse("http://www.ncbi.nlm.nih.gov/entrez/eutils/erss.cgi?rss_guid=18ervbTh5APXvdeErcztvCKsr9OQiih79YXqPknvMYRqWSUcQP",
+								 isURL = TRUE,
+								 useInternalNodes = TRUE))
+```
+
+```{r}
+mySrc=xpathApply(xmlRoot(xml), "//item")
+
+```
+
+
