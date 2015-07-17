@@ -4,15 +4,23 @@ author: "Sunit Jain"
 date: "July 16, 2015"
 output: html_document
 ---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
 ```{r dependencies}
 package = function(p) {
 	if (!p %in% installed.packages()){ install.packages(p) }
-	require(p, character.only=TRUE)
+	#require(p, character.only=TRUE)
 }
 package("XML")
 package("tm")
 package("SnowballC")
-# http://www.r-bloggers.com/how-to-download-complete-xml-records-from-pubmed-and-extract-data/
+package("wordcloud") 
+package("ggplot2")
+package("wordcloud")
 ```
 
 ```{r setup}
@@ -28,19 +36,22 @@ xml.file="data/pubmed_allTime_search.xml"
 xml.data = xmlTreeParse(xml.file, useInternalNodes = TRUE)
 top=xmlRoot(xml.data)
 abstracts=xpathApply(top,"//Abstract/AbstractText", xmlValue)
-abstract.words=paste(abstracts, collapse = " ")
-abstract.words=strsplit(abstract.words, split= " ")
+#abstract.words=paste(abstracts, collapse = " ")
+#abstract.words=strsplit(abstract.words, split= " ")
 ```
 
 ```{r}
 library(tm)
-abstract.words = VectorSource(abstract.words)
-corpus = Corpus(abstract.words)
-corpus = tm_map(corpus, content_transformer(tolower))
+#abstract.words = VectorSource(abstract.words)
+abstract.vector = VectorSource(abstracts)
+#corpus = Corpus(abstract.words)
+corpus = Corpus(abstract.vector)
 corpus = tm_map(corpus, removePunctuation)
 corpus = tm_map(corpus, removeNumbers)
-corpus = tm_map(corpus, stripWhitespace)
+corpus = tm_map(corpus, content_transformer(tolower))
 corpus = tm_map(corpus, removeWords, stopwords("english"))
+data.specfic.words=c("metagenomic", "metagenomics","metagenome","metatranscriptome","metatranscriptomic","metatranscriptomics","metaproteome","metaproteomic","metaproteomics","sequencing","sequence","studies", "studying", "analysis", "using", "uses")
+corpus = tm_map(corpus, removeWords, data.specfic.words)
 ```
 
 ```{r}
@@ -50,20 +61,52 @@ corpus = tm_map(corpus, removeWords, stopwords("english"))
 ```
 
 ```{r}
-library(SnowballC)   
+library(SnowballC) 
 docs = tm_map(corpus, stemDocument)
 docs = tm_map(docs, PlainTextDocument) 
+docs = tm_map(docs, removeNumbers)
 dtm <- DocumentTermMatrix(docs)
-freq <- colSums(as.matrix(dtm))   
+tdm <- TermDocumentMatrix(docs)
+freq <- colSums(as.matrix(dtm))
 length(freq) 
 
 ord <- order(freq) 
 m <- as.matrix(dtm)   
 dim(m)   
-write.csv(m, file="dtm.csv", sep="\t", quote=F)  
-dtms <- removeSparseTerms(dtm, 0.1)
-wf <- data.frame(word=names(freq), freq=freq)  
-write.table(wf, "word_freq.tsv", sep="\t", quote=F)
+#write.table(m, file="data/dtm.csv", sep="\t", quote=F)  
+#dtms <- removeSparseTerms(dtm, 0.7)
+#dtms
+#freq <- sort(colSums(as.matrix(dtm)), decreasing=TRUE)
+#findFreqTerms(dtm, lowfreq=1000)
+wf <- data.frame(word=names(freq), freq=freq)
+write.table(wf, "data/word_freq.tsv", sep="\t", quote=F)
 ```
 
+
+```{r}
+library(ggplot2)
+p <- ggplot(subset(wf, freq>1000), aes(word, freq))  +
+	geom_bar(stat="identity") +
+	theme(axis.text.x=element_text(angle=45, hjust=1))   
+p  
+```
+
+
+```{r}
+findAssocs(dtm,"sequenc", corlimit=0.98)
+```
+
+
+```{r}
+library(wordcloud)
+dark2 <- brewer.pal(6, "Dark2")   
+set.seed(42)
+wordcloud(names(freq), freq, min.freq=2000, scale=c(5, .1), colors=dark2)
+```
+
+
+```{r}
+set.seed(42)
+wordcloud(names(freq), freq, max.words=100, rot.per=0.2, colors=dark2) 
+```
 
