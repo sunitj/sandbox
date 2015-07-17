@@ -1,0 +1,88 @@
+---
+title: "MIS - Figure 2"
+author: "Sunit Jain"
+date: "Wednesday, August 06, 2014"
+output:  pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r setup, include=FALSE, echo=FALSE, cache=FALSE}
+suppressMessages(require(knitr))
+suppressMessages(require(ggplot2))
+```
+
+```{r, echo=FALSE, cache=FALSE}
+workdir="/Users/sunitj/Github/sandbox/DESeq2/"
+setwd(workdir)
+all.tab=read.table(file="data/top500_detailed.tsv", header=TRUE, sep="\t", quote="\"", skipNul=T)
+# kable(head(all.tab), format="rst")
+
+# Create separate table to calculate SDs
+sd.tab=data.frame(Rank=seq(1:500))
+sd.tab$D1N4=all.tab$X2012.1D/all.tab$X2012.4N
+sd.tab$D2N4=all.tab$X2012.2D/all.tab$X2012.4N
+sd.tab$D3N4=all.tab$X2012.3D/all.tab$X2012.4N
+sd.tab$D1N5=all.tab$X2012.1D/all.tab$X2012.5N
+sd.tab$D2N5=all.tab$X2012.2D/all.tab$X2012.5N
+sd.tab$D3N5=all.tab$X2012.3D/all.tab$X2012.5N
+sd.tab$D1N6=all.tab$X2012.1D/all.tab$X2012.6N
+sd.tab$D2N6=all.tab$X2012.2D/all.tab$X2012.6N
+sd.tab$D3N6=all.tab$X2012.3D/all.tab$X2012.6N
+sd.tab$SD=apply(sd.tab,1,sd)
+# head(sd.tab)
+
+all.tab$SD=abs(log2(sd.tab$SD))
+all.tab$Rank=seq(1:500)
+all.tab$Day.Night = ifelse(all.tab$Log2 >= 0, "Day", "Night")
+# head(all.tab)
+```
+
+```{r, fig.width=6, fig.height=8.5, warning=FALSE, tidy=TRUE}
+p1 = ggplot(all.tab, aes(x=Rank, y=Log2)) + geom_point(aes(shape=factor(Day.Night)),na.rm=T)
+p1 = p1 + geom_hline(aes(yintercept=0), linetype=4, color="red")
+p1 = p1 + scale_x_continuous(name="Genes ranked in order of transcript abundance", breaks=seq(0,500,100))
+p1 = p1 + scale_y_continuous(name="Log2 ratio of day/night transcript abundance", breaks=seq(-12,12,3))
+p1 = p1 + scale_shape_discrete(name="Order")
+p1 + theme_bw() + theme(legend.position="bottom")
+```
+
+
+```{r, fig.width=6, fig.height=8.5, warning=FALSE, tidy=TRUE}
+p2 = ggplot(all.tab, aes(x=Rank, y=Log2, color=factor(Day.Night), shape=factor(Day.Night)))
+p2 = p2 + geom_point(na.rm=T)
+p2 = p2 + geom_hline(aes(yintercept=0), linetype=4, color="red")
+p2.scale = p2 + scale_x_continuous(name="Genes ranked in order of transcript abundance", breaks=seq(0,500,100))
+p2.scale = p2.scale + scale_y_continuous(name="Log2 ratio of day/night transcript abundance", breaks=seq(-12,12,3))
+p2.scale = p2.scale + scale_color_discrete(name="Order")
+p2.scale = p2.scale + scale_shape_discrete(name="Order")
+p2.scale = p2.scale + geom_smooth(method=lm, na.rm=T)
+p2.scale + theme_bw() + theme(legend.position="bottom")
+```
+
+
+```{r, fig.width=6, fig.height=8.5, warning=FALSE, tidy=TRUE}
+p3=p2
+p3.serr = p3 + geom_errorbar(aes(ymax = Log2 + SD, ymin=Log2 - SD))
+p3.serr = p3.serr + facet_wrap(~Short.Name, shrink=T, scale="free_x", ncol=2)
+p3.serr = p3.serr + xlab("Genes ranked in order of transcript abundance")
+p3.serr = p3.serr + ylab("Log2 ratio of day/night transcript abundance")
+p3.serr = p3.serr + scale_color_discrete(name="Order")
+p3.serr = p3.serr + scale_shape_discrete(name="Order")
+p3.serr = p3.serr + theme_bw()
+p3.serr + theme(legend.position="bottom")
+```
+
+
+```{r, fig.width=6, fig.height=8.5, warning=FALSE, tidy=TRUE}
+p3.lm = p3 + geom_smooth(method=lm, na.rm=T)
+p3.lm = p3.lm + facet_wrap(~Short.Name, ncol=2, scale="free_x")
+p3.lm = p3.lm + xlab("Genes ranked in order of transcript abundance")
+p3.lm = p3.lm + ylab("Log2 ratio of day/night transcript abundance")
+p3.lm = p3.lm + scale_color_discrete(name="Order")
+p3.lm = p3.lm + scale_shape_discrete(name="Order")
+p3.lm + theme_bw() + theme(legend.position="bottom")
+```

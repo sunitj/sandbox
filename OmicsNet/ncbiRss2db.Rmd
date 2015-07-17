@@ -79,7 +79,7 @@ dim(m)
 #freq <- sort(colSums(as.matrix(dtm)), decreasing=TRUE)
 #findFreqTerms(dtm, lowfreq=1000)
 wf <- data.frame(word=names(freq), freq=freq)
-write.table(wf, "data/word_freq.tsv", sep="\t", quote=F)
+write.table(wf, "data/word_freq.tsv", sep="\t", quote=F, row.names=F)
 ```
 
 
