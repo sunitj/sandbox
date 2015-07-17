@@ -7,7 +7,7 @@ output: html_document
 ```{r dependencies}
 package = function(p) {
 	if (!p %in% installed.packages()){ install.packages(p) }
-#	require(p, character.only=TRUE)
+	require(p, character.only=TRUE)
 }
 package("XML")
 package("tm")
@@ -26,11 +26,19 @@ xml.file="data/pubmed_allTime_search.xml"
 # Parse XML into XML Tree
 xml.data = xmlTreeParse(xml.file, useInternalNodes = TRUE)
 top=xmlRoot(xml.data)
-abstracts=xpathApply(top,"//Abstract", xmlValue)
+abstracts=xpathApply(top,"//Abstract/AbstractText", xmlValue)
 abstract.words=paste(abstracts, collapse = " ")
+```
 
+```{r}
 library(tm)
-abstract.corpus <- Corpus(abstract.words)
+abstract.words = VectorSource(abstract.words)
+corpus = Corpus(abstract.words)
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, stripWhitespace)
+corpus = tm_map(corpus, removeWords, stopwords("english"))
 ```
 
 ```{r}
