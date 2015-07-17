@@ -11,15 +11,15 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
 ```
 
 ```{r setup, include=FALSE, echo=FALSE, cache=FALSE}
-suppressMessages(require(knitr))
-suppressMessages(require(ggplot2))
+library(knitr)
+library(ggplot2)
 ```
 
 ```{r, echo=FALSE, cache=FALSE}
 workdir="/Users/sunitj/Github/sandbox/DESeq2/"
 setwd(workdir)
 all.tab=read.table(file="data/top500_detailed.tsv", header=TRUE, sep="\t", quote="\"", skipNul=T)
-# kable(head(all.tab), format="rst")
+#kable(head(all.tab), format="markdown")
 
 # Create separate table to calculate SDs
 sd.tab=data.frame(Rank=seq(1:500))

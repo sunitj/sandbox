@@ -329,8 +329,6 @@ combined.anno=left_join(combined.union, annotation, by="Name")
 write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE);
 ```
 
-
-
 \newpage
 
 ## Differential Expression
