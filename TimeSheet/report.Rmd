@@ -1,0 +1,110 @@
+---
+title: "Time Report 2015"
+author: "Sunit Jain"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r dependencies}
+package = function(p) {
+	if (!p %in% installed.packages()){ install.packages(p) }
+	require(p, character.only=TRUE)
+}
+package("googlesheets")
+package("dplyr")
+package("ggplot2")
+package("RColorBrewer")
+package("xkcd")
+package("extrafont")
+package("lubridate")
+```
+
+
+```{r authenticate, eval=TRUE}
+library(googlesheets)
+ts.url="https://docs.google.com/a/umich.edu/spreadsheets/d/1ajQKLvYJOcK0wHOsfI8bfCcJmMAxpLfz1d65H3dY0Cg/edit?usp=sharing"
+ts=gs_url(ts.url,lookup=T,visibility = "private")
+```
+
+```{r extract}
+library(dplyr)
+library(tidyr)
+ytd=ts %>% gs_read(ws="2015", range="A2:BD24",verbose=T) %>% replace(is.na(.), 0) %>% filter(Total.Hrs.Spent != 0)
+ytd$PI=as.factor(ytd$PI)
+ytd$Projects=as.factor(ytd$Projects)
+t.ytd=ytd %>% gather("Weeks","Hours", 5:56)
+weeks.2015=ts %>% gs_read(ws="2015 Weeks",verbose=T)
+```
+
+```{r beautify, eval=FALSE}
+library(ggplot2)
+library(RColorBrewer)
+
+library(xkcd)
+library(extrafont)
+download.file("http://simonsoftware.se/other/xkcd.ttf", dest="xkcd.ttf", mode="wb")
+system("mkdir ~/.fonts")
+system("cp xkcd.ttf ~/.fonts")
+font_import(pattern="[X|x]kcd", prompt=F)
+loadfonts()
+```
+
+Work distribution and time reporting for the month of ``r month(now(), label=T, abbr = F)``.
+
+Report generated on: `r Sys.Date()`.
+
+## Last Month
+The following is the work distribution for the last month
+
+```{r monthly}
+weeks.this.month=weeks.2015[weeks.2015$Month == paste(month(now(), label=T, abbr = F), "2015", sep = " "), ]
+this.month=paste("Week",
+								 (
+								 	weeks.this.month$X2015.Cum.Weeks - weeks.this.month$X2015.Weeks +1
+								 	) : weeks.this.month$X2015.Cum.Weeks,
+								 sep = ".")
+mtd=t.ytd %>%
+	select(PI,Weeks,Hours) %>%
+	filter(Weeks %in% this.month) %>%
+	group_by(PI,Weeks) %>%
+	transmute(PI.Hours=sum(Hours)) %>%
+	distinct()
+# plot
+ggplot(mtd,aes(Weeks, PI.Hours))+
+	geom_area(aes(color=PI, group=PI, fill=PI), position="stack") + 
+	scale_fill_brewer(palette = "Set1") +
+	scale_color_brewer(palette = "Set1") +
+	geom_hline(aes(yintercept=40), linetype=2) +
+	ggtitle(paste(month(now(), label=T, abbr = F), "2015")) +
+	theme_xkcd() +
+	theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+## Year to date
+```{r byPI}
+pi.ytd=t.ytd %>%
+	select(PI,Weeks,Hours) %>%
+	group_by(PI,Weeks) %>%
+	transmute(PI.Hours=sum(Hours)) %>%
+	distinct()
+# plot
+ggplot(pi.ytd,aes(Weeks, PI.Hours))+
+	geom_area(aes(color=PI, group=PI, fill=PI), position="stack") + 
+	scale_fill_brewer(palette = "Set1") +
+	scale_color_brewer(palette = "Set1") +
+	geom_hline(aes(yintercept=40), linetype=2) +
+	ggtitle("Year to date")+
+	theme_xkcd() +
+	theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+\newpage
+
+```{r sessionInfo}
+sessionInfo()
+```
+
