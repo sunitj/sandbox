@@ -80,8 +80,11 @@ ggplot(mtd,aes(Weeks, PI.Hours))+
 	scale_color_brewer(palette = "Set1") +
 	geom_hline(aes(yintercept=40), linetype=2) +
 	ggtitle(paste(month(now(), label=T, abbr = F), "2015")) +
-	theme_xkcd() +
-	theme(axis.text.x = element_text(angle = 90, hjust = 1))
+	theme(axis.text.x = element_text(angle = 90),
+				plot.title=element_text(vjust = 1)) +
+	theme_xkcd()
+ggsave(filename = "Figs/monthly-1.pdf")
+embed_fonts("Figs/monthly-1.pdf")
 ```
 
 ## Year to date
@@ -99,7 +102,10 @@ ggplot(pi.ytd,aes(Weeks, PI.Hours))+
 	geom_hline(aes(yintercept=40), linetype=2) +
 	ggtitle("Year to date")+
 	theme_xkcd() +
-	theme(axis.text.x = element_text(angle = 90, hjust = 1))
+	theme(axis.text.x = element_text(angle = 90),
+				plot.title= element_text(vjust=1))
+ggsave(filename = "Figs/byPI-1.pdf")
+embed_fonts("Figs/byPI-1.pdf")
 ```
 
 \newpage
