@@ -1,6 +1,7 @@
-*/data
-*/.RData
-*/.Rhistory
-*/Figs
-*/*_cache
+data
+*.RData
+*.Rhistory
+Figs
+*_cache
+.httr-oauth
 .Rproj.user
