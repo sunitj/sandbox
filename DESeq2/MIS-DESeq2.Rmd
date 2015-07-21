@@ -41,7 +41,6 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
 ```{r setup,  echo=FALSE}
 ## Setup
 library("DESeq2")
-#library("ReportingTools")
 workdir="/Users/sunitj/Github/sandbox/DESeq2"
 dataDir="/Users/sunitj/Github/sandbox/DESeq2/data"
 setwd(workdir)
@@ -90,7 +89,6 @@ colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=
 
 ## Reads per Sample
 ```{r readsPerSample}
-#apply(counts(ddsHTSeq.all), 2, sum)
 colSums(counts(ddsHTSeq.all))
 ```
 
@@ -99,7 +97,6 @@ Get rid of genes which did not occur frequently enough. Here we say, lets get ri
 ```{r dim}
 keep=rowSums(counts(ddsHTSeq.all)>=minRawCount) >= 2
 ddsHTSeq=ddsHTSeq.all[keep ,]
-#apply(counts(ddsHTSeq), 2, sum)
 colSums(counts(ddsHTSeq))
 ```
 
@@ -180,7 +177,9 @@ ggplot(data, aes(PC1, PC2)) +
   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
 	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
 	theme_minimal()
+```
 
+```{r distDendro}
 library(ggdendro)
 hc=hclust(sampleDists)
 ggdendrogram(hc,leaf_labels = T)
@@ -236,13 +235,6 @@ plot(sizeFactors(dds), colSums(counts(ddsHTSeq)))
 abline(lm(colSums(counts(dds)) ~ sizeFactors(dds) + 0))
 text(sizeFactors(dds), colSums(counts(ddsHTSeq)), colnames(counts(dds)), pos=3)
 dev.off()
-```
-
-### Log2 Normalization
-
-```{r log2norm}
-#hierarchical clustering
-
 ```
 
 ### Raw vs Normalized Counts
@@ -400,7 +392,7 @@ summary(res)
 Novices in high-throughput biology often assume that thresholding these p values at a low value, say 0.05, as is often done in other settings, would be appropriate – but it is not. We briefly explain why:
 There are `r sum(res$pvalue < 0.05, na.rm=TRUE)` genes with a p value below 0.05 among the `r sum(!is.na(res$pvalue))` genes, for which the test succeeded in reporting a p value.
 
-Now, assume for a moment that the null hypothesis is true for all genes, i.e., no gene is affected by the treatment with dexamethasone. Then, by the definition of p value, we expect up to `5%` of the genes to have a p value below 0.05. This amounts to `r floor(sum(!is.na(res$pvalue)) * 0.05)` genes. If we just considered the list of genes with a p value below 0.05 as differentially expressed, this list should therefore be expected to contain up to `r sum(!is.na(res$pvalue)) * 0.05`/`r sum(res$pvalue < 0.05, na.rm=TRUE)`=`r (sum(!is.na(res$pvalue)) * 0.05)/sum(res$pvalue < 0.05, na.rm=TRUE)`% false positives.
+Now, assume for a moment that the null hypothesis is true for all genes, i.e., no gene is affected by the treatment with dexamethasone. Then, by the definition of p value, we expect up to `5%` of the genes to have a p value below 0.05. This amounts to `r floor(sum(!is.na(res$pvalue)) * 0.05)` genes. If we just considered the list of genes with a p value below 0.05 as differentially expressed, this list should therefore be expected to contain up to `r sum(!is.na(res$pvalue)) * 0.05`/`r sum(res$pvalue < 0.05, na.rm=TRUE)`=`r (sum(!is.na(res$pvalue)) * 0.05)/sum(res$pvalue < 0.05, na.rm=TRUE)*100`% false positives.
 
 DESeq2 uses the Benjamini-Hochberg (BH) adjustment as described in the base R p.adjust function; in brief, this method calculates for each gene an adjusted p value which answers the following question: if one called significant all genes with a p value less than or equal to this gene’s p value threshold, what would be the fraction of false positives (the false discovery rate, FDR) among them (in the sense of the calculation outlined above)? These values, called the BH-adjusted p values, are given in the column padj of the res object.
 Hence, if we consider a fraction of 10% false positives acceptable, we can consider all genes with an adjusted p value below 10% = 0.1 as significant. How many such genes are there?
