@@ -30,6 +30,7 @@ package("ggplot2")
 package("knitr")
 package("vioplot")
 package("pheatmap")
+package("ggdendro")
 ```
 
 ```{r global_options, include=FALSE}
@@ -89,7 +90,8 @@ colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=
 
 ## Reads per Sample
 ```{r readsPerSample}
-apply(counts(ddsHTSeq.all), 2, sum)
+#apply(counts(ddsHTSeq.all), 2, sum)
+colSums(counts(ddsHTSeq.all))
 ```
 
 ### Filtering the data
@@ -97,7 +99,13 @@ Get rid of genes which did not occur frequently enough. Here we say, lets get ri
 ```{r dim}
 keep=rowSums(counts(ddsHTSeq.all)>=minRawCount) >= 2
 ddsHTSeq=ddsHTSeq.all[keep ,]
-apply(counts(ddsHTSeq), 2, sum)
+#apply(counts(ddsHTSeq), 2, sum)
+colSums(counts(ddsHTSeq))
+```
+
+### How many reads were removed when Min Raw Count = `r minRawCount`?
+```{r difference}
+colSums(counts(ddsHTSeq.all))-colSums(counts(ddsHTSeq))
 ```
 This reduces the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
 
@@ -164,9 +172,18 @@ Another way to visualize sample-to-sample distances is a principal-components an
 library("ggplot2")
 data = plotPCA(rld, intgroup = "condition", returnData=TRUE)
 percentVar = round(100 * attr(data, "percentVar"))
-qplot(PC1, PC2, color=name, shape=condition, data=data) +
-  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
-  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+
+ggplot(data, aes(PC1, PC2)) +
+	geom_point(aes(color=condition,shape=condition), size=5) +
+	scale_color_brewer(palette = "Set1") +
+	xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
+	theme_minimal()
+
+library(ggdendro)
+hc=hclust(sampleDists)
+ggdendrogram(hc,leaf_labels = T)
 ```
 
 \newpage
@@ -179,7 +196,12 @@ mds <- data.frame(cmdscale(sampleDistMatrix))
 mds <- cbind(mds, colData(rld))
 mds$name=sampleTable$sampleName
 mds=data.frame(mds)
-qplot(X1,X2,color=name,shape=condition,data=mds)
+
+ggplot(mds, aes(X1, X2)) +
+	geom_point(aes(color=condition,shape=condition), size=5) +
+	scale_color_brewer(palette = "Set1") +
+	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
+	theme_minimal()
 ```
 
 \newpage
@@ -191,16 +213,36 @@ mds <- data.frame(cmdscale(samplePoisDistMatrix))
 mds <- cbind(mds, colData(ddsHTSeq))
 mds$name=sampleTable$sampleName
 mds=data.frame(mds)
-qplot(X1,X2,color=name,shape=condition,data=mds)
+
+ggplot(mds, aes(X1, X2)) +
+	geom_point(aes(color=condition,shape=condition), size=5) +
+	scale_color_brewer(palette = "Set1") +
+	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
+	theme_minimal()
 ```
 
 \newpage
+
 ## Counts
+
 In order to normalise the raw counts we will start by determining the relative library sizes, or size factors for each library. For example, if the counts of the expressed genes in one sample are, on average, twice as high as in another, the size factor for the first sample should be twice as large as the one for the other sample. These size factors can be obtained with the function `estimateSizeFactors`:
 
 ```{r counts, }
 dds=estimateSizeFactors(ddsHTSeq)
 sizeFactors(dds)
+
+#Plot column sums according to size factor
+plot(sizeFactors(dds), colSums(counts(ddsHTSeq)))
+abline(lm(colSums(counts(dds)) ~ sizeFactors(dds) + 0))
+text(sizeFactors(dds), colSums(counts(ddsHTSeq)), colnames(counts(dds)), pos=3)
+dev.off()
+```
+
+### Log2 Normalization
+
+```{r log2norm}
+#hierarchical clustering
+
 ```
 
 ### Raw vs Normalized Counts
@@ -218,6 +260,7 @@ vioplot(countData$Day_1,countData$Day_2, countData$Day_3, countData$Night_4, cou
         names=colnames(countData))
 title("Violin Plots for Normalized Counts")
 summary(countData)
+normalized.countData=countData
 ```
 
 \newpage
@@ -236,7 +279,6 @@ title("Violin Plots for Raw Counts")
 summary(countData)
 ```
 
-
 \newpage
 
 ## Rank Abundance
@@ -245,6 +287,8 @@ summary(countData)
 ```{r day_rank}
 library("tidyr")
 library("dplyr")
+# Comment the following line out if normalized counts not required.
+countData=normalized.countData
 day.counts=countData[, c("Day_1","Day_2","Day_3")]
 day.counts$Name=rownames(day.counts)
 day.counts.ordered = day.counts %>% 
