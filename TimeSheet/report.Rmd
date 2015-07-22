@@ -33,17 +33,21 @@ ts=gs_url(ts.url,lookup=T,visibility = "private")
 ```{r extract}
 library(dplyr)
 library(tidyr)
-ytd=ts %>% gs_read(ws="2015", range="A2:BD24",verbose=T) %>% replace(is.na(.), 0) %>% filter(Total.Hrs.Spent != 0)
+ytd=ts %>%
+	gs_read(ws="2015", range="A2:BD24",verbose=T) %>%
+	replace(is.na(.), 0) %>%
+	filter(Total.Hrs.Spent != 0)
 ytd$PI=as.factor(ytd$PI)
 ytd$Projects=as.factor(ytd$Projects)
-t.ytd=ytd %>% gather("Weeks","Hours", 5:56)
-weeks.2015=ts %>% gs_read(ws="2015 Weeks",verbose=T)
+
+t.ytd=ytd %>%
+	gather("Weeks","Hours", 5:56)
+
+weeks.2015=ts %>%
+	gs_read(ws="2015 Weeks",verbose=T)
 ```
 
 ```{r beautify, eval=FALSE}
-library(ggplot2)
-library(RColorBrewer)
-
 library(xkcd)
 library(extrafont)
 download.file("http://simonsoftware.se/other/xkcd.ttf", dest="xkcd.ttf", mode="wb")
@@ -61,6 +65,8 @@ Report generated on: `r Sys.Date()`.
 The following is the work distribution for the last month
 
 ```{r monthly}
+library(ggplot2)
+library(RColorBrewer)
 weeks.this.month=weeks.2015[weeks.2015$Month == paste(month(now(), label=T, abbr = F), "2015", sep = " "), ]
 this.month=paste("Week",
 								 (
@@ -71,11 +77,12 @@ mtd=t.ytd %>%
 	select(PI,Weeks,Hours) %>%
 	filter(Weeks %in% this.month) %>%
 	group_by(PI,Weeks) %>%
-	transmute(PI.Hours=sum(Hours)) %>%
-	distinct()
+	summarise(PI.Hours=sum(Hours))
+
 # plot
 ggplot(mtd,aes(Weeks, PI.Hours))+
-	geom_area(aes(color=PI, group=PI, fill=PI), position="stack") + 
+	geom_area(aes(group=PI, fill=PI), position="stack", color="black") + 
+	guides(fill=guide_legend(override.aes=list(colour=NA))) +
 	scale_fill_brewer(palette = "Set1") +
 	scale_color_brewer(palette = "Set1") +
 	geom_hline(aes(yintercept=40), linetype=2) +
@@ -87,16 +94,46 @@ ggsave(filename = "Figs/monthly-1.pdf")
 embed_fonts("Figs/monthly-1.pdf")
 ```
 
+```{r monthByPI, eval=FALSE}
+mpi=mtd %>%
+	select(PI,PI.Hours) %>%
+	group_by(PI) %>% 
+	summarise(m.PI.Hours=sum(PI.Hours))
+
+# plot
+library(scales)
+ggplot(mpi, aes(x=1, y=m.PI.Hours, fill=PI)) +
+        ggtitle("How I've spent my hours this month") +
+        geom_bar(stat="identity", color='black') +
+        guides(fill=guide_legend(override.aes=list(colour=NA))) +
+				coord_flip() +
+				theme_xkcd() +
+        theme(axis.ticks=element_blank(),  # the axis ticks
+              axis.title=element_blank(),  # the axis labels
+              axis.text.y=element_blank(), # the 0.75, 1.00, 1.25 labels
+              axis.text.x=element_text(color='black', size = 12, angle = 90, family = "Comic Sans MS")
+        			) +
+				scale_y_continuous(
+        	    breaks=cumsum(mpi$m.PI.Hours) - mpi$m.PI.Hours/2,
+          	  labels=percent(mpi$m.PI.Hours/sum(mpi$m.PI.Hours)),
+        	    position_dodge(height = 1)
+        ) +
+				scale_fill_brewer(palette = "Set1")
+```
+
+
+
 ## Year to date
 ```{r byPI}
 pi.ytd=t.ytd %>%
 	select(PI,Weeks,Hours) %>%
 	group_by(PI,Weeks) %>%
-	transmute(PI.Hours=sum(Hours)) %>%
-	distinct()
+	summarise(PI.Hours=sum(Hours))
+
 # plot
 ggplot(pi.ytd,aes(Weeks, PI.Hours))+
-	geom_area(aes(color=PI, group=PI, fill=PI), position="stack") + 
+	geom_area(aes(group=PI, fill=PI), position="stack", color="black") +
+	guides(fill=guide_legend(override.aes=list(colour=NA))) +
 	scale_fill_brewer(palette = "Set1") +
 	scale_color_brewer(palette = "Set1") +
 	geom_hline(aes(yintercept=40), linetype=2) +
