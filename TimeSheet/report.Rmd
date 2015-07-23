@@ -14,6 +14,7 @@ package = function(p) {
 	if (!p %in% installed.packages()){ install.packages(p) }
 	require(p, character.only=TRUE)
 }
+package("data.table")
 package("googlesheets")
 package("dplyr")
 package("ggplot2")
@@ -21,8 +22,14 @@ package("RColorBrewer")
 package("xkcd")
 package("extrafont")
 package("lubridate")
+package("magrittr")
 ```
 
+```{r move}
+subDir=paste(month(now(), label=T, abbr = F), year(now()), sep="_")
+monthDir=paste(getwd(),"data", subDir, sep="/")
+dir.create(path = monthDir, recursive = T, showWarnings = FALSE)
+```
 
 ```{r authenticate, eval=TRUE}
 library(googlesheets)
@@ -36,12 +43,10 @@ library(tidyr)
 ytd=ts %>%
 	gs_read(ws="2015", range="A2:BD24",verbose=T) %>%
 	replace(is.na(.), 0) %>%
-	filter(Total.Hrs.Spent != 0)
+	filter(Total.Hrs.Spent != 0) %>%
+	gather("Weeks","Hours", 5:56)
 ytd$PI=as.factor(ytd$PI)
 ytd$Projects=as.factor(ytd$Projects)
-
-t.ytd=ytd %>%
-	gather("Weeks","Hours", 5:56)
 
 weeks.2015=ts %>%
 	gs_read(ws="2015 Weeks",verbose=T)
@@ -73,7 +78,7 @@ this.month=paste("Week",
 								 	weeks.this.month$X2015.Cum.Weeks - weeks.this.month$X2015.Weeks +1
 								 	) : weeks.this.month$X2015.Cum.Weeks,
 								 sep = ".")
-mtd=t.ytd %>%
+mtd=ytd %>%
 	select(PI,Weeks,Hours) %>%
 	filter(Weeks %in% this.month) %>%
 	group_by(PI,Weeks) %>%
@@ -90,8 +95,8 @@ ggplot(mtd,aes(Weeks, PI.Hours))+
 	theme(axis.text.x = element_text(angle = 90),
 				plot.title=element_text(vjust = 1)) +
 	theme_xkcd()
-ggsave(filename = "Figs/monthly-1.pdf")
-embed_fonts("Figs/monthly-1.pdf")
+ggsave(filename = "data/monthly-1.pdf")
+embed_fonts("data/monthly-1.pdf")
 ```
 
 ```{r monthByPI, eval=FALSE}
@@ -121,11 +126,9 @@ ggplot(mpi, aes(x=1, y=m.PI.Hours, fill=PI)) +
 				scale_fill_brewer(palette = "Set1")
 ```
 
-
-
 ## Year to date
 ```{r byPI}
-pi.ytd=t.ytd %>%
+pi.ytd=ytd %>%
 	select(PI,Weeks,Hours) %>%
 	group_by(PI,Weeks) %>%
 	summarise(PI.Hours=sum(Hours))
@@ -141,11 +144,101 @@ ggplot(pi.ytd,aes(Weeks, PI.Hours))+
 	theme_xkcd() +
 	theme(axis.text.x = element_text(angle = 90),
 				plot.title= element_text(vjust=1))
-ggsave(filename = "Figs/byPI-1.pdf")
-embed_fonts("Figs/byPI-1.pdf")
+ggsave(filename = "data/byPI-1.pdf")
+embed_fonts("data/byPI-1.pdf")
+```
+
+```{r copyFiles}
+files=list.files(path=paste(getwd(),"data", sep="/"), pattern = "*.pdf", full.names = T)
+file.copy(from=files,to=monthDir)
+file.remove(files)
 ```
 
 \newpage
+# Balance Sheets
+```{r contacts}
+contacts=ts %>%
+	gs_read(ws="Contacts",verbose=T) %>%
+	replace(is.na(.), "")
+#contacts$Abb=as.factor(contacts$Abb)
+```
+
+```{r balance_sheet}
+bs=ts %>%
+	gs_read(ws="BalanceSheet",verbose=T) %>%
+	replace(is.na(.), "000000")
+#bs$Abb=as.factor(bs$Abb)
+bs$Date=mdy(bs$Date)
+bs$Period.From=mdy(bs$Period.From)
+bs$Period.To=mdy(bs$Period.To)
+```
+
+```{r who_do_i_bill}
+# get_all_PIs whose project is still ongoing
+all.PIs=contacts %>% filter(Status == "Ongoing")
+
+# check when they were last billed
+last.billed=bs %>% group_by(Abb) %>% arrange(desc(Period.To)) %>% distinct(Abb) %>% select(-PI)
+
+# get new billing cycle
+this.billing.cycle=left_join(all.PIs,last.billed, by="Abb") %>% select(Abb, PI, Invoice.Num, Date, Type, Period.From, Period.To, Shortcode, Rate)
+this.billing.cycle$Period.From=ceiling_date(this.billing.cycle$Period.To, "week") + days(1)
+this.billing.cycle$Period.To= ceiling_date(now(), "week")
+this.billing.cycle$Date=today()
+this.billing.cycle$Week.From=week(this.billing.cycle$Period.From)
+this.billing.cycle$Week.To=week(this.billing.cycle$Period.To)
+
+# Get hours worked per PI this since last billed
+get_billing_hours=function(x) {
+	Week.From=x$Week.From
+	Week.To=x$Week.To
+	worked.for=x$PI
+	x$Invoice.Num=paste(x$Abb,
+											paste("00",
+														as.numeric(strsplit(x$Invoice.Num, split = "-")[[1]][2]) + 1,
+														sep = ""),
+											sep = "-")
+	weeks.worked=paste("Week",
+				Week.From : Week.To,
+				sep = ".")
+	x$Hours=as.numeric(ytd %>%
+		select(PI,Weeks,Hours) %>%
+		filter(PI == worked.for) %>% 
+		filter(Weeks %in% weeks.worked) %>%
+		summarise(PI.Hours=sum(Hours)))
+	#return(data.frame("Abb"=x$Abb,"B.Hours"=pi.hr,"Invoice.Num"=pi.invoice))
+	return(x)
+	}
+
+library(data.table)
+this.billing.cycle=this.billing.cycle %>% 
+	rowwise() %>% 
+	do(values=get_billing_hours(.)) %$% values %>%
+	rbindlist() %>%
+	mutate(Total=Hours*Rate) %>% 
+	select(-c(Week.To,Week.From))
+this.billing.cycle
+```
+
+\newpage
+
+```{r generate_invoice}
+this.billing.cycle=this.billing.cycle[c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total")]
+
+```
+
+
+
+```{r get_recent}
+# get_recent 
+	recent=x %>% 
+		filter(filter_col == filter_val) %>% 
+		arrange(sort_by) %>% 
+		slice(1)
+```
+
+
+
 
 ```{r sessionInfo}
 sessionInfo()
