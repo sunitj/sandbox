@@ -23,6 +23,7 @@ package("xkcd")
 package("extrafont")
 package("lubridate")
 package("magrittr")
+package("knitr")
 ```
 
 ```{r move}
@@ -62,9 +63,7 @@ font_import(pattern="[X|x]kcd", prompt=F)
 loadfonts()
 ```
 
-Work distribution and time reporting for the month of ``r month(now(), label=T, abbr = F)``.
-
-Report generated on: `r Sys.Date()`.
+This is a work distribution and time report for the month of ``r month(now(), label=T, abbr = F)``. The report was generated on: `r Sys.Date()`.
 
 ## Last Month
 The following is the work distribution for the last month
@@ -148,14 +147,16 @@ ggsave(filename = "data/byPI-1.pdf")
 embed_fonts("data/byPI-1.pdf")
 ```
 
-```{r copyFiles}
+```{r copyFiles, results="hide"}
 files=list.files(path=paste(getwd(),"data", sep="/"), pattern = "*.pdf", full.names = T)
 file.copy(from=files,to=monthDir)
 file.remove(files)
 ```
 
 \newpage
-# Balance Sheets
+
+# Income
+
 ```{r contacts}
 contacts=ts %>%
 	gs_read(ws="Contacts",verbose=T) %>%
@@ -175,19 +176,20 @@ bs$Period.To=mdy(bs$Period.To)
 
 ```{r who_do_i_bill}
 # get_all_PIs whose project is still ongoing
-all.PIs=contacts %>% filter(Status == "Ongoing")
-
+all.PIs=contacts %>% filter(Status == "Ongoing"| Status == "Ending")
 # check when they were last billed
 last.billed=bs %>% group_by(Abb) %>% arrange(desc(Period.To)) %>% distinct(Abb) %>% select(-PI)
 
 # get new billing cycle
-this.billing.cycle=left_join(all.PIs,last.billed, by="Abb") %>% select(Abb, PI, Invoice.Num, Date, Type, Period.From, Period.To, Shortcode, Rate)
+this.billing.cycle=left_join(all.PIs,last.billed, by="Abb") %>% select(Abb, PI, Invoice.Num, Date, Type, Period.From, Period.To, Shortcode, Rate, Status)
 this.billing.cycle$Period.From=ceiling_date(this.billing.cycle$Period.To, "week") + days(1)
 this.billing.cycle$Period.To= ceiling_date(now(), "week")
 this.billing.cycle$Date=today()
 this.billing.cycle$Week.From=week(this.billing.cycle$Period.From)
 this.billing.cycle$Week.To=week(this.billing.cycle$Period.To)
+```
 
+```{r pi_last_cycle}
 # Get hours worked per PI this since last billed
 get_billing_hours=function(x) {
 	Week.From=x$Week.From
@@ -202,10 +204,11 @@ get_billing_hours=function(x) {
 				Week.From : Week.To,
 				sep = ".")
 	x$Hours=as.numeric(ytd %>%
-		select(PI,Weeks,Hours) %>%
-		filter(PI == worked.for) %>% 
-		filter(Weeks %in% weeks.worked) %>%
-		summarise(PI.Hours=sum(Hours)))
+										 	select(PI,Weeks,Hours) %>%
+										 	filter(PI == worked.for) %>%
+										 	filter(Weeks %in% weeks.worked) %>%
+										 	summarise(PI.Hours=sum(Hours))
+										 	)
 	#return(data.frame("Abb"=x$Abb,"B.Hours"=pi.hr,"Invoice.Num"=pi.invoice))
 	return(x)
 	}
@@ -217,30 +220,26 @@ this.billing.cycle=this.billing.cycle %>%
 	rbindlist() %>%
 	mutate(Total=Hours*Rate) %>% 
 	select(-c(Week.To,Week.From))
-this.billing.cycle
+
+```
+
+```{r filter_projects_by_hours}
+setcolorder(this.billing.cycle,c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total", "Status"))
+ongoing=this.billing.cycle %>% filter(Status == "Ongoing") %>% filter(Hours >= 5)
+ending=this.billing.cycle %>% filter(Status == "Ending")
+this.billing.cycle=rbind(ongoing,ending)
+this.billing.cycle %>% select(-c(Abb,Type)) %>% kable(.)
+```
+
+```{r update_balance_sheet}
+for (i in 1:nrow(this.billing.cycle)){
+	gs_add_row(ss=ts, ws="BalanceSheet", input=this.billing.cycle[i,], verbose=TRUE)
+	Sys.sleep(0.3)
+}
 ```
 
 \newpage
-
-```{r generate_invoice}
-this.billing.cycle=this.billing.cycle[c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total")]
-
-```
-
-
-
-```{r get_recent}
-# get_recent 
-	recent=x %>% 
-		filter(filter_col == filter_val) %>% 
-		arrange(sort_by) %>% 
-		slice(1)
-```
-
-
-
-
-```{r sessionInfo}
+```{r sessionInfo, eval=FALSE}
 sessionInfo()
 ```
 
