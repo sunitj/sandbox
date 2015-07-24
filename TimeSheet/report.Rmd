@@ -224,7 +224,9 @@ this.billing.cycle=this.billing.cycle %>%
 ```
 
 ```{r filter_projects_by_hours}
+# reorder columns accoding to the sheet
 setcolorder(this.billing.cycle,c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total", "Status"))
+# don't bill unless number of hours worked is greater that or equal to 5 OR the project is ending.
 ongoing=this.billing.cycle %>% filter(Status == "Ongoing") %>% filter(Hours >= 5)
 ending=this.billing.cycle %>% filter(Status == "Ending")
 this.billing.cycle=rbind(ongoing,ending)
