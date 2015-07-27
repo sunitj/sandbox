@@ -74,8 +74,8 @@ library(RColorBrewer)
 weeks.this.month=weeks.2015[weeks.2015$Month == paste(month(now(), label=T, abbr = F), "2015", sep = " "), ]
 this.month=paste("Week",
 								 (
-								 	weeks.this.month$X2015.Cum.Weeks - weeks.this.month$X2015.Weeks +1
-								 	) : weeks.this.month$X2015.Cum.Weeks,
+								 	weeks.this.month$X2015.Cum.Weeks - weeks.this.month$X2015.Weeks
+								 	) : weeks.this.month$X2015.Cum.Weeks+1,
 								 sep = ".")
 mtd=ytd %>%
 	select(PI,Weeks,Hours) %>%
@@ -133,6 +133,7 @@ pi.ytd=ytd %>%
 	summarise(PI.Hours=sum(Hours))
 
 # plot
+highlight=data.frame(xmin=this.month[1], xmax=this.month[length(this.month)], ymin=-Inf, ymax=Inf)
 ggplot(pi.ytd,aes(Weeks, PI.Hours))+
 	geom_area(aes(group=PI, fill=PI), position="stack", color="black") +
 	guides(fill=guide_legend(override.aes=list(colour=NA))) +
@@ -140,6 +141,10 @@ ggplot(pi.ytd,aes(Weeks, PI.Hours))+
 	scale_color_brewer(palette = "Set1") +
 	geom_hline(aes(yintercept=40), linetype=2) +
 	ggtitle("Year to date")+
+	geom_rect(data = highlight,aes(xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax),
+						color="grey20",
+						alpha=0.2,
+						inherit.aes=F) +
 	theme_xkcd() +
 	theme(axis.text.x = element_text(angle = 90),
 				plot.title= element_text(vjust=1))
@@ -162,6 +167,7 @@ contacts=ts %>%
 	gs_read(ws="Contacts",verbose=T) %>%
 	replace(is.na(.), "")
 #contacts$Abb=as.factor(contacts$Abb)
+contacts$Fixed.Charge=as.numeric(contacts$Fixed.Charge)
 ```
 
 ```{r balance_sheet}
@@ -181,8 +187,8 @@ all.PIs=contacts %>% filter(Status == "Ongoing"| Status == "Ending")
 last.billed=bs %>% group_by(Abb) %>% arrange(desc(Period.To)) %>% distinct(Abb) %>% select(-PI)
 
 # get new billing cycle
-this.billing.cycle=left_join(all.PIs,last.billed, by="Abb") %>% select(Abb, PI, Invoice.Num, Date, Type, Period.From, Period.To, Shortcode, Rate, Status)
-this.billing.cycle$Period.From=ceiling_date(this.billing.cycle$Period.To, "week") + days(1)
+this.billing.cycle=left_join(all.PIs,last.billed, by="Abb") %>% select(Abb, PI, Invoice.Num, Date, Type, Period.From, Period.To, Shortcode, Rate, Status, Fixed.Charge)
+this.billing.cycle$Period.From=ceiling_date(this.billing.cycle$Period.To  + days(1), "week")
 this.billing.cycle$Period.To= ceiling_date(now(), "week")
 this.billing.cycle$Date=today()
 this.billing.cycle$Week.From=week(this.billing.cycle$Period.From)
@@ -223,19 +229,35 @@ this.billing.cycle=this.billing.cycle %>%
 
 ```
 
+## Hours worked so far
 ```{r filter_projects_by_hours}
 # reorder columns accoding to the sheet
-setcolorder(this.billing.cycle,c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total", "Status"))
+setcolorder(this.billing.cycle,c("Abb", "PI", "Invoice.Num", "Date", "Type", "Period.From", "Period.To", "Shortcode", "Hours", "Rate", "Total", "Status", "Fixed.Charge"))
 # don't bill unless number of hours worked is greater that or equal to 5 OR the project is ending.
 ongoing=this.billing.cycle %>% filter(Status == "Ongoing") %>% filter(Hours >= 5)
 ending=this.billing.cycle %>% filter(Status == "Ending")
-this.billing.cycle=rbind(ongoing,ending)
-this.billing.cycle %>% select(-c(Abb,Type)) %>% kable(.)
+this.billing.cycle=rbind(ongoing,ending) %>% replace(is.na(.), 0)
+this.billing.cycle %>% select(-c(Abb,Type, Status, Fixed.Charge)) %>% kable(.)
 ```
 
+## Fixed Billing
+```{r project_billed}
+fixed.billing=this.billing.cycle %>% filter(Fixed.Charge > 0)
+reg.billing=this.billing.cycle %>% filter(Fixed.Charge == 0)
+
+total.workhours = Vectorize(function(a, b)
+  sum(!weekdays(seq(a,b,"days")) %in% c("Saturday", "Sunday")) * 8)
+
+fixed.billing$Hours=total.workhours(fixed.billing$Period.From, fixed.billing$Period.To) * fixed.billing$Fixed.Charge
+fixed.billing$Total=fixed.billing$Hours * fixed.billing$Rate
+fixed.billing %>% select(-c(Abb,Type, Status, Fixed.Charge)) %>% kable(.)
+```
+
+
 ```{r update_balance_sheet}
-for (i in 1:nrow(this.billing.cycle)){
-	gs_add_row(ss=ts, ws="BalanceSheet", input=this.billing.cycle[i,], verbose=TRUE)
+billing=rbind(fixed.billing,reg.billing) %>% select(-c(Status, Fixed.Charge))
+for (i in 1:nrow(billing)){
+	gs_add_row(ss=ts, ws="BalanceSheet", input=billing[i,], verbose=TRUE)
 	Sys.sleep(0.3)
 }
 ```
