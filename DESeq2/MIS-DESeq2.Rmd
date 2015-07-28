@@ -20,7 +20,6 @@ If you're unsure that you have all the pacakges required to run this workflow. O
 
 ```{r install, eval=FALSE, results='hide',  echo=FALSE}
 package = function(p) {
-	result=""
   if (!p %in% installed.packages()){ 
   		install.packages(p)
   }
@@ -416,11 +415,9 @@ ddsva$SV1=svseq$sv[, 1]
 ddsva$SV2=svseq$sv[, 2]
 design(ddsva)= ~SV1 + SV2 + condition
 ddsva <- DESeq(ddsva)
-
-dds=ddsva
 ```
 
-## Results
+## Results before removing batch effects
 
 As `res` is a DataFrame object, it carries metadata with information on the meaning of the columns:
 
@@ -436,6 +433,7 @@ resva <- results(ddsva, parallel=T)
 mcols(resva, use.names=TRUE)
 summary(resva)
 res=resva
+dds=ddsva
 ```
 
 
@@ -556,8 +554,6 @@ colors <- colorRampPalette( rev(brewer.pal(9, "PuOr")) )(255)
 sidecols <- c("grey","dodgerblue")[ rld$condition ]
 mat <- assay(rld)[ topVarGenes, ]
 mat <- mat - rowMeans(mat)
-#heatmap.2(mat, trace="none", col=colors, ColSideColors=sidecols,
-#          labRow=FALSE, mar=c(10,2), scale="row")
 
 mat <- assay(rld)[ topVarGenes, ]
 mat <- mat - rowMeans(mat)
@@ -577,10 +573,8 @@ Total Significant genes: `r sigGenes`
 ```{r write, }
 resOrdered <- res[order(res$padj),]
 resOrdered$Name=rownames(resOrdered)
-#head(resOrdered)
 
 library(dplyr)
-#head(resOrdered.Sig)
 resOrdered.Sig=data.frame(resOrdered[1:sigGenes ,])
 resOrdered.Sig=resOrdered.Sig[c(7,1:6)]
 resOrdered.Sig=left_join(resOrdered.Sig, tmp.countData, by="Name")
@@ -598,28 +592,24 @@ resOrdered.Sig %>%
 ```
 
 \newpage
-
+### Plot
 ```{r}
-resOrdered.Sig %>%
-	arrange(padj) %>% 
-	mutate(Rank=min_rank(padj)) %>% 
-	ggplot(aes(Rank,log2FoldChange)) +
-	geom_point(aes(position="jitter")) +
-	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
-	geom_hline(aes(yintercept=0), linetype=2,color="red") +
-	theme_minimal()
+ranked.sig.data=resOrdered.Sig %>%
+	arrange(padj,desc(abs(log2FoldChange))) %>% 
+	mutate(Rank=row_number(padj))
 
-
-resOrdered.Sig %>%
-	arrange(padj) %>% 
-	mutate(Rank=min_rank(padj)) %>% 
+ranked.sig.data %>% 
 	ggplot(aes(Rank,log2FoldChange)) +
-	geom_point(aes(position="jitter")) +
+	xlab("Rank by adjusted p-values") +
+	ylab("Log2 Fold Change") +
+	geom_point() +
+	geom_text(aes(label=IMG_Source), vjust=-4)+
 	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
 	geom_hline(aes(yintercept=0), linetype=2,color="red") +
 	theme_minimal()
 ```
 
+\newpage
 
 ## Independent Filtering
 
