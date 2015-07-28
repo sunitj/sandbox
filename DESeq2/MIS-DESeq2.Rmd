@@ -20,7 +20,10 @@ If you're unsure that you have all the pacakges required to run this workflow. O
 
 ```{r install, eval=FALSE, results='hide',  echo=FALSE}
 package = function(p) {
-  if (!p %in% installed.packages()){ install.packages(p) }
+	result=""
+  if (!p %in% installed.packages()){ 
+  		install.packages(p)
+  }
 #	require(p, character.only=TRUE)
 }
 package("gplots")
@@ -35,17 +38,17 @@ package("ggdendro")
 
 ```{r global_options, include=FALSE}
 knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
-                      echo=FALSE, warning=FALSE, message=FALSE)
+											echo=FALSE, warning=FALSE, message=FALSE)
 ```
 
 ```{r setup,  echo=FALSE}
 ## Setup
 library("DESeq2")
-workdir="/Users/sunitj/Github/sandbox/DESeq2"
-dataDir="/Users/sunitj/Github/sandbox/DESeq2/data"
-setwd(workdir)
+workdir=getwd()
+dataDir=paste(getwd(),"data", sep = "/")
 gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
-minRawCount=20
+minRawCount=2 # at least 2 conditions should have at least this raw count to consider that gene
+topN=500 # number of genes in rank abundance plote
 ```
 
 ## Generate a read count matrix using `htseq-count`
@@ -172,7 +175,7 @@ percentVar = round(100 * attr(data, "percentVar"))
 
 ggplot(data, aes(PC1, PC2)) +
 	geom_point(aes(color=condition,shape=condition), size=5) +
-	scale_color_brewer(palette = "Set1") +
+	scale_color_brewer(palette = "Dark2") +
 	xlab(paste0("PC1: ",percentVar[1],"% variance")) +
   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
 	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
@@ -198,7 +201,7 @@ mds=data.frame(mds)
 
 ggplot(mds, aes(X1, X2)) +
 	geom_point(aes(color=condition,shape=condition), size=5) +
-	scale_color_brewer(palette = "Set1") +
+	scale_color_brewer(palette = "Dark2") +
 	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
 	theme_minimal()
 ```
@@ -215,7 +218,7 @@ mds=data.frame(mds)
 
 ggplot(mds, aes(X1, X2)) +
 	geom_point(aes(color=condition,shape=condition), size=5) +
-	scale_color_brewer(palette = "Set1") +
+	scale_color_brewer(palette = "Dark2") +
 	geom_text(aes(label=name), hjust=0.5, vjust=-1.5) +
 	theme_minimal()
 ```
@@ -274,6 +277,7 @@ summary(countData)
 \newpage
 
 ## Rank Abundance
+Plotting Rank Abundance for top `r topN` genes.
 
 ### Day Counts
 ```{r day_rank}
@@ -282,21 +286,26 @@ library("dplyr")
 # Comment the following line out if normalized counts not required.
 countData=normalized.countData
 day.counts=countData[, c("Day_1","Day_2","Day_3")]
+#day.counts=countData[, c("Night_4","Day_2","Day_3")]
 day.counts$Name=rownames(day.counts)
 day.counts.ordered = day.counts %>% 
   gather(Days, Counts, -Name) %>%
   group_by(Name) %>%
-  summarise(Totals=sum(Counts), mean=mean(Counts), se=sd(Counts)/sqrt(length(Counts))) %>%
-  arrange(desc(mean))
-day.counts.ordered.top100=day.counts.ordered[1:500 ,]
-day.limits=aes(ymax=mean+se, ymin=mean-se)
-day.counts.ordered.top100$Rank = seq(length(day.counts.ordered.top100$Name))
+  summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
+	top_n(topN, Mean) %>% 
+	mutate(Rank=min_rank(desc(Mean)))
+#day.counts.ordered$Rank = seq(length(day.counts.ordered$Name))
 
-ggplot(day.counts.ordered.top100, aes(Rank,mean)) +
-  geom_point(aes(order=Rank)) + geom_errorbar(day.limits) +
+ggplot(day.counts.ordered, aes(Rank,Mean)) +
+  geom_point(
+  	#aes(order=Rank)
+  	) + 
+	xlim(1,topN) +
+	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
   scale_y_log10()+
   ylab("log10 Average Counts")+
-  xlab("Top 500 Genes")
+  xlab("Top 500 Genes")+
+	theme_minimal()
 ```
 
 ### Night Counts
@@ -304,38 +313,48 @@ ggplot(day.counts.ordered.top100, aes(Rank,mean)) +
 library("tidyr")
 library("dplyr")
 night.counts=countData[, c("Night_4","Night_5","Night_6")]
+#night.counts=countData[, c("Day_1","Night_5","Night_6")]
 night.counts$Name=rownames(night.counts)
 night.counts.ordered = night.counts %>% 
   gather(Days, Counts, -Name) %>%
   group_by(Name) %>%
-  summarise(Totals=sum(Counts), mean=mean(Counts), se=sd(Counts)/sqrt(length(Counts))) %>%
-  arrange(desc(mean))
-night.counts.ordered.top100=night.counts.ordered[1:500 ,]
-night.limits=aes(ymax=mean+se, ymin=mean-se)
-night.counts.ordered.top100$Rank = seq(1,length(night.counts.ordered.top100$Name))
+  summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
+  top_n(topN,Mean) %>% 
+	mutate(Rank=min_rank(desc(Mean)))
 
-
-ggplot(night.counts.ordered.top100, aes(Rank,mean)) +
-  geom_point(aes(order=Rank)) + geom_errorbar(night.limits) +
+ggplot(night.counts.ordered, aes(Rank,Mean)) +
+  geom_point(
+  #	aes(order=Rank)
+  	) +
+	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
   scale_y_log10() +
+	xlim(1,topN)+
   ylab("log10 Average Counts")+
-  xlab("Top 500 Genes")
+  xlab("Top 500 Genes")+
+	theme_minimal()
 ```
 
 ### Day vs Night
 ```{r d_vs_n_rank}
-day.counts.ordered.top100$Sample="Day"
-night.counts.ordered.top100$Sample="Night"
-combined.counts=bind_rows(day.counts.ordered.top100,night.counts.ordered.top100) %>%
-  arrange(desc(mean))
-combined.counts$Rank = seq(1,length(combined.counts$Name))
-combined.limits=aes(ymax=mean+se, ymin=mean-se)
+day.counts.ordered$Sample="Day"
+night.counts.ordered$Sample="Night"
+#combined.counts=rbind(day.counts.ordered,night.counts.ordered)
+combined.counts=bind_rows(list(day.counts.ordered,night.counts.ordered)) %>%
+	select(-Rank) %>% 
+  top_n(topN, Mean) %>% 
+	mutate(Rank=min_rank(desc(Mean)))
 
-ggplot(combined.counts, aes(Rank,mean, color=Sample)) +
-  geom_point(aes(order=Rank), position="jitter") + geom_errorbar(combined.limits) +
+ggplot(combined.counts, aes(Rank,Mean, color=Sample)) +
+  geom_point(
+#  	aes(order=Rank)
+  	) + 
+	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
+	xlim(1,topN) +
   scale_y_log10() +
+	scale_color_brewer(palette = "Dark2") +
   ylab("log10 Average Counts")+
-  xlab("Combined Top Genes")
+  xlab("Combined Top Genes")+
+	theme_minimal()
 ```
 
 ```{r annotate_counts, cache=TRUE}
@@ -343,7 +362,7 @@ annotation=read.table("data/all_combined.products", sep="\t", quote="")
 colnames(annotation)=c("Name", "IMG_Product","IMG_Source")
 annotation$Name=as.character(annotation$Name)
 
-combined.union=as.data.frame(union(day.counts.ordered.top100$Name,night.counts.ordered.top100$Name))
+combined.union=as.data.frame(union(day.counts.ordered$Name,night.counts.ordered$Name))
 colnames(combined.union)="Name"
 combined.union$Name=as.character(combined.union$Name)
 
@@ -351,18 +370,18 @@ tmp.countData=countData
 tmp.countData$Name=rownames(tmp.countData)
 
 combined.union=left_join(combined.union, tmp.countData, by="Name")
-combined.union=left_join(combined.union, day.counts.ordered.top100, by="Name")
-combined.union=left_join(combined.union, night.counts.ordered.top100, by="Name")
+combined.union=left_join(combined.union, day.counts.ordered, by="Name")
+combined.union=left_join(combined.union, night.counts.ordered, by="Name")
 
 colnames(combined.union)=c("Name","Day_1","Day_2","Day_3","Night_4","Night_5","Night_6",
                             "Day_Totals","Day_Mean","Day_SE","Day_Rank", "Del1",
                             "Night_Totals","Night_Mean","Night_SE", "Night_Rank", "Del2")
-combined.union=subset(combined.union, select=-c(Del1,Del2))
+combined.union=combined.union %>% select(-c(Del1,Del2))
 combined.anno=left_join(combined.union, annotation, by="Name")
 ```
 
 ```{r write_counts}
-write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE);
+write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE, na = "0");
 ```
 
 \newpage
@@ -377,7 +396,31 @@ register(MulticoreParam(4))
 dds <- DESeq(dds, parallel=T)
 ```
 
-### Results
+### Removing Batch Effects
+
+Using package `sva`. Here is how the package has been described:
+
+> The sva package contains functions for removing batch effects and other unwanted variation in high-throughput experiment. Specifically, the sva package contains functions for the identifying and building surrogate variables for high-dimensional data sets. Surrogate variables are covariates constructed directly from high-dimensional data (like gene expression/RNA sequencing/methylation/brain imaging data) that can be used in subsequent analyses to adjust for unknown, unmodeled, or latent sources of noise. The sva package can be used to remove artifacts in three ways: (1) identifying and estimating surrogate variables for unknown sources of variation in high-throughput experiments (Leek and Storey 2007 PLoS Genetics,2008 PNAS), (2) directly removing known batch effects using ComBat (Johnson et al. 2007 Biostatistics) and (3) removing batch effects with known control probes (Leek 2014 biorXiv). Removing batch effects and using surrogate variables in differential expression analysis have been shown to reduce dependence, stabilize error rate estimates, and improve reproducibility, see (Leek and Storey 2007 PLoS Genetics, 2008 PNAS or Leek et al. 2011 Nat. Reviews Genetics).
+
+
+```{r}
+dat <- counts(dds, normalized=TRUE)
+idx <- rowMeans(dat) > 1
+dat <- dat[idx,]
+mod <- model.matrix(~ condition, colData(dds))
+mod0 <- model.matrix(~ 1, colData(dds))
+library(sva)
+svseq <- svaseq(dat, mod, mod0, n.sv=2)
+ddsva=dds
+ddsva$SV1=svseq$sv[, 1]
+ddsva$SV2=svseq$sv[, 2]
+design(ddsva)= ~SV1 + SV2 + condition
+ddsva <- DESeq(ddsva)
+
+dds=ddsva
+```
+
+## Results
 
 As `res` is a DataFrame object, it carries metadata with information on the meaning of the columns:
 
@@ -386,6 +429,15 @@ res <- results(dds, parallel=T)
 mcols(res, use.names=TRUE)
 summary(res)
 ```
+
+## Results after removing batch effects
+```{r results_wo_BE,  }
+resva <- results(ddsva, parallel=T)
+mcols(resva, use.names=TRUE)
+summary(resva)
+res=resva
+```
+
 
 ### Multiple testing
 
@@ -398,7 +450,8 @@ DESeq2 uses the Benjamini-Hochberg (BH) adjustment as described in the base R p.
 Hence, if we consider a fraction of 10% false positives acceptable, we can consider all genes with an adjusted p value below 10% = 0.1 as significant. How many such genes are there?
 
 ```{r}
-sum(res$padj < 0.1, na.rm=TRUE)
+sigGenes=sum(res$padj < 0.1, na.rm=TRUE)
+sigGenes
 ```
 
 We subset the results table to these genes and then sort it by the log2 fold change estimate to get the significant genes with the strongest down-regulation.
@@ -414,7 +467,7 @@ head(resSig[ order( -resSig$log2FoldChange ), ])
 ```
 
 \newpage
-
+<!--
 ### Cook's Distance per gene
 
 ```{r cooks, }
@@ -428,7 +481,7 @@ m <- ncol(dds)
 p <- 2
 abline(h=qf(.99, p, m - p))
 ```
-
+-->
 \newpage
 
 ## Diagnostic Plots
@@ -512,26 +565,61 @@ df <- as.data.frame(colData(rld))
 pheatmap(mat, annotation_col=df)
 ```
 
+
 We can now see blocks of genes which covary across patients. Note that a set of genes at the top of the heatmap are separating the N061011 cell line from the others. At the bottom of the heatmap, we see a set of genes for which the treated samples have higher gene expression.
+
+\newpage
+
+## Significant Genes
+
+Total Significant genes: `r sigGenes`
 
 ```{r write, }
 resOrdered <- res[order(res$padj),]
-
 resOrdered$Name=rownames(resOrdered)
-head(resOrdered)
+#head(resOrdered)
 
-resOrdered.top125=data.frame(resOrdered[1:125 ,])
-resOrdered.top125=resOrdered.top125[c(7,1:6)]
-resOrdered.top125=left_join(resOrdered.top125, tmp.countData, by="Name")
-resOrdered.top125=left_join(resOrdered.top125, day.counts.ordered, by="Name")
-resOrdered.top125=left_join(resOrdered.top125, night.counts.ordered, by="Name")
-resOrdered.top125=left_join(resOrdered.top125, annotation, by="Name")
-colnames(resOrdered.top125)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
+library(dplyr)
+#head(resOrdered.Sig)
+resOrdered.Sig=data.frame(resOrdered[1:sigGenes ,])
+resOrdered.Sig=resOrdered.Sig[c(7,1:6)]
+resOrdered.Sig=left_join(resOrdered.Sig, tmp.countData, by="Name")
+resOrdered.Sig=left_join(resOrdered.Sig, day.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+resOrdered.Sig=left_join(resOrdered.Sig, night.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+resOrdered.Sig=left_join(resOrdered.Sig, annotation, by="Name")
+colnames(resOrdered.Sig)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
 
-write.table(as.data.frame(resOrdered.top125), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
+write.table(as.data.frame(resOrdered.Sig), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
+
+library(knitr)
+resOrdered.Sig %>% 
+	select(c(1,3,7,20,21)) %>% 
+	kable(.)
 ```
 
 \newpage
+
+```{r}
+resOrdered.Sig %>%
+	arrange(padj) %>% 
+	mutate(Rank=min_rank(padj)) %>% 
+	ggplot(aes(Rank,log2FoldChange)) +
+	geom_point(aes(position="jitter")) +
+	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
+	geom_hline(aes(yintercept=0), linetype=2,color="red") +
+	theme_minimal()
+
+
+resOrdered.Sig %>%
+	arrange(padj) %>% 
+	mutate(Rank=min_rank(padj)) %>% 
+	ggplot(aes(Rank,log2FoldChange)) +
+	geom_point(aes(position="jitter")) +
+	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
+	geom_hline(aes(yintercept=0), linetype=2,color="red") +
+	theme_minimal()
+```
+
 
 ## Independent Filtering
 
