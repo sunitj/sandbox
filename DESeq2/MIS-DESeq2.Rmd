@@ -284,16 +284,14 @@ library("tidyr")
 library("dplyr")
 # Comment the following line out if normalized counts not required.
 countData=normalized.countData
-day.counts=countData[, c("Day_1","Day_2","Day_3")]
-#day.counts=countData[, c("Night_4","Day_2","Day_3")]
-day.counts$Name=rownames(day.counts)
-day.counts.ordered = day.counts %>% 
-  gather(Days, Counts, -Name) %>%
+day.counts.ordered = countData %>% 
+	select(starts_with("Day")) %>% 
+	mutate(Name=rownames(.)) %>% 
+  gather(ToD, Counts, -Name) %>%
   group_by(Name) %>%
   summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
 	top_n(topN, Mean) %>% 
 	mutate(Rank=min_rank(desc(Mean)))
-#day.counts.ordered$Rank = seq(length(day.counts.ordered$Name))
 
 ggplot(day.counts.ordered, aes(Rank,Mean)) +
   geom_point(
@@ -311,14 +309,13 @@ ggplot(day.counts.ordered, aes(Rank,Mean)) +
 ```{r night_rank}
 library("tidyr")
 library("dplyr")
-night.counts=countData[, c("Night_4","Night_5","Night_6")]
-#night.counts=countData[, c("Day_1","Night_5","Night_6")]
-night.counts$Name=rownames(night.counts)
-night.counts.ordered = night.counts %>% 
-  gather(Days, Counts, -Name) %>%
+night.counts.ordered = countData %>% 
+	select(starts_with("Night")) %>% 
+	mutate(Name=rownames(.)) %>% 
+  gather(ToD, Counts, -Name) %>%
   group_by(Name) %>%
   summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
-  top_n(topN,Mean) %>% 
+	top_n(topN, Mean) %>% 
 	mutate(Rank=min_rank(desc(Mean)))
 
 ggplot(night.counts.ordered, aes(Rank,Mean)) +
