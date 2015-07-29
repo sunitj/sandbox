@@ -1,0 +1,365 @@
+---
+title: "MIS-DESeq2"
+author: "Sunit Jain"
+date: "January 6, 2015"
+output:
+  pdf_document:
+    fig_crop: no
+    toc: yes
+    toc_depth: 3
+  html_document:
+    dev: svg
+    toc: yes
+    toc_depth: 3
+---
+
+\newpage
+
+## Dependencies
+If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
+
+```{r install, eval=FALSE, results='hide',  echo=FALSE}
+package = function(p) {
+  if (!p %in% installed.packages()){ 
+  		install.packages(p)
+  }
+#	require(p, character.only=TRUE)
+}
+package("gplots")
+package("RColorBrewer")
+package("PoiClaClu")
+package("ggplot2")
+package("knitr")
+package("vioplot")
+package("pheatmap")
+package("ggdendro")
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+											echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r setup,  echo=FALSE}
+## Setup
+library("DESeq2")
+workdir=getwd()
+dataDir=paste(getwd(),"data", sep = "/")
+gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
+minRawCount=1 # at least these 2 conditions should have at least this raw count to consider that gene
+topN=500 # number of genes in rank abundance plote
+```
+
+## Generate a read count matrix using `htseq-count`
+Sample command:
+
+`htseq-count -f bam -r name -t CDS -o scaffold.htseq.sam -i ID -q scaffold_sortedByName.bam all_combined.gff`
+
+This command was run for each sample individually.
+
+### Merging duplicate genes
+I performed a self blast and looked at results that had a percent identity greater than 98%, query coverage greater than 96% and a minimum alignment length of 500 bases. Once I had this subset, I screened out the hits to exons since we won't be considering them for this experiment anyway. I was left with the following two gene pairs:
+
+* scaffold_344578__MIS_1109813.1  scaffold_133898__MIS_10093600.14
+* scaffold_219988__MIS_10179608.12  scaffold_555373__MIS_1172265.1
+
+that had high enough similarity based on the thresholds mentioned above that their count data needed to be merged. The perl script `mergeCounts.pl` was run on each htseq-count output individually in order to accomplish this. Here is a sample command used for one of the htseq-count outputs:
+
+`perl mergeCounts.pl -l realDuplicateGenes.list -tsv Day_1.htseqCount.tsv -o Day_1.htseqCount.merged.tsv`
+
+where, realDuplicateGenes.list contains the two gene pairs mentioned above.
+
+
+```{r readTSV, }
+### Import Count files
+sampleFiles=list.files(path=dataDir,pattern="*.htseqCount.merged.tsv", full.names=TRUE)
+```
+
+```{r conditions, }
+### Set Conditions
+sampleCondition=c(rep("Day",3),rep("Night",3))
+sampleName=c("Day_1","Day_2","Day_3", "Night_4", "Night_5", "Night_6")
+sampleTable=data.frame(sampleName = sampleName, fileName=sampleFiles, condition=sampleCondition)
+```
+
+### Import Counts into DESeq2
+Once we were satisfied with the genes and their counts. We imported the count data into DESeq2.
+```{r deseq, cache=TRUE}
+ddsHTSeq.all=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
+colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=c("Night","Day"))
+```
+
+## Reads per Sample
+```{r readsPerSample}
+colSums(counts(ddsHTSeq.all))
+```
+
+### Filtering the data
+Get rid of genes which did not occur frequently enough. Here we say, lets get rid of genes with counts >=`r minRawCount` in at least 2 samples.
+```{r dim}
+keep=rowSums(counts(ddsHTSeq.all)>=minRawCount) >= 2
+ddsHTSeq=ddsHTSeq.all[keep ,]
+colSums(counts(ddsHTSeq))
+```
+
+### How many reads were removed when Min Raw Count = `r minRawCount`?
+```{r difference}
+colSums(counts(ddsHTSeq.all))-colSums(counts(ddsHTSeq))
+```
+This reduces the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
+
+\newpage
+
+## Counts
+
+In order to normalise the raw counts we will start by determining the relative library sizes, or size factors for each library. For example, if the counts of the expressed genes in one sample are, on average, twice as high as in another, the size factor for the first sample should be twice as large as the one for the other sample. These size factors can be obtained with the function `estimateSizeFactors`:
+
+```{r counts, }
+dds=estimateSizeFactors(ddsHTSeq)
+sizeFactors(dds)
+```
+
+### Normalized Counts
+
+```{r counts_norm, }
+library("vioplot")
+dds.ncounts=counts(dds, normalized=TRUE)
+head(dds.ncounts)
+countData=data.frame(dds.ncounts)
+vioplot(countData$Day_1,countData$Day_2, countData$Day_3, countData$Night_4, countData$Night_5, countData$Night_6,
+        col="gold",
+        names=colnames(countData))
+title("Violin Plots for Normalized Counts")
+summary(countData)
+```
+
+\newpage
+
+## Rank Abundance
+Plotting Rank Abundance for top `r topN` genes.
+
+```{r day_rank}
+### Day Counts
+library("tidyr")
+library("dplyr")
+
+day.counts.ordered = countData %>% 
+	select(starts_with("Day")) %>% 
+	mutate(Name=rownames(.)) %>% 
+  gather(ToD, Counts, -Name) %>%
+  group_by(Name) %>%
+  summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
+	top_n(topN, Mean) %>% 
+	mutate(Rank=min_rank(desc(Mean)))
+```
+
+```{r night_rank}
+### Night Counts
+library("tidyr")
+library("dplyr")
+
+night.counts.ordered = countData %>% 
+	select(starts_with("Night")) %>% 
+	mutate(Name=rownames(.)) %>% 
+  gather(ToD, Counts, -Name) %>%
+  group_by(Name) %>%
+  summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
+	top_n(topN, Mean) %>% 
+	mutate(Rank=min_rank(desc(Mean)))
+```
+
+### Day vs Night
+```{r d_vs_n_rank}
+day.counts.ordered$Sample="Day"
+night.counts.ordered$Sample="Night"
+#combined.counts=rbind(day.counts.ordered,night.counts.ordered)
+combined.counts=bind_rows(list(day.counts.ordered,night.counts.ordered)) %>%
+	select(-Rank) %>% 
+  top_n(topN, Mean) %>% 
+	mutate(RankByMean=row_number(desc(Mean))) %>%
+	mutate(RankByName=min_rank(Name))
+combined.counts$Name= as.factor(combined.counts$Name)
+combined.counts$Sample= as.factor(combined.counts$Sample)
+
+ggplot(combined.counts, aes(RankByMean,Mean, color=Sample)) +
+  geom_line(aes(group=Name)) + 
+	geom_point(aes(order=RankByName)) +
+	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
+#	xlim(1,topN) +
+  scale_y_log10() +
+	scale_color_brewer(palette = "Dark2") +
+  ylab("log10 Average Counts")+
+  xlab("Combined Top Genes")+
+	theme_minimal()
+```
+
+```{r annotate_counts, cache=TRUE}
+annotation=read.table("data/all_combined.products", sep="\t", quote="")
+colnames(annotation)=c("Name", "IMG_Product","IMG_Source")
+annotation$Name=as.character(annotation$Name)
+
+combined.union=as.data.frame(union(day.counts.ordered$Name,night.counts.ordered$Name))
+colnames(combined.union)="Name"
+combined.union$Name=as.character(combined.union$Name)
+
+tmp.countData=countData
+tmp.countData$Name=rownames(tmp.countData)
+
+combined.union=left_join(combined.union, tmp.countData, by="Name")
+combined.union=left_join(combined.union, day.counts.ordered, by="Name")
+combined.union=left_join(combined.union, night.counts.ordered, by="Name")
+
+colnames(combined.union)=c("Name","Day_1","Day_2","Day_3","Night_4","Night_5","Night_6",
+                            "Day_Totals","Day_Mean","Day_SE","Day_Rank", "Del1",
+                            "Night_Totals","Night_Mean","Night_SE", "Night_Rank", "Del2")
+combined.union=combined.union %>% select(-c(Del1,Del2))
+combined.anno=left_join(combined.union, annotation, by="Name")
+```
+
+```{r write_counts}
+write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE, na = "0");
+```
+
+\newpage
+
+## Differential Expression
+
+### Removing Batch Effects
+Differential expression was calculater using the DESeq2 wrapper function over 4 processors.
+
+```{r deseq_wrapper,  }
+library("BiocParallel")
+register(MulticoreParam(4))
+
+dat <- counts(dds, normalized=TRUE)
+idx <- rowMeans(dat) > 1
+dat <- dat[idx,]
+mod <- model.matrix(~ condition, colData(dds))
+mod0 <- model.matrix(~ 1, colData(dds))
+library(sva)
+svseq <- svaseq(dat, mod, mod0, n.sv=2)
+ddsva=dds
+ddsva$SV1=svseq$sv[, 1]
+ddsva$SV2=svseq$sv[, 2]
+design(ddsva)= ~SV1 + SV2 + condition
+ddsva <- DESeq(ddsva)
+```
+
+## Results after removing batch effects
+```{r results_wo_BE,  }
+resva <- results(ddsva, parallel=T)
+mcols(resva, use.names=TRUE)
+summary(resva)
+res=resva
+dds=ddsva
+```
+
+\newpage
+
+### P-Value Histogram
+
+Another useful diagnostic plot is the histogram of the p values.
+
+```{r pval_hist, }
+hist(res$pvalue[res$baseMean > 1], breaks=20, col="grey50", border="white")
+```
+
+\newpage
+
+## Gene clustering
+
+In the sample distance heatmap made previously, the dendrogram at the side shows us a hierarchical clustering of the samples. Such a clustering can also be performed for the genes. Since the clustering is only relevant for genes that actually carry signal, one usually carries it out only for a subset of most highly variable genes. Here, for demonstration, let us select the 20 genes with the highest variance across samples. We will work with the rlog transformed counts:
+
+```{r geneFilter, }
+library("genefilter")
+topVarGenes <- head(order(-rowVars(assay(ddsHTSeq))),20)
+```
+
+The heatmap becomes more interesting if we do not look at absolute expression strength but rather at the amount by which each gene deviates in a specific sample from the gene's average across all samples. Hence, we center each genes' values across samples, and plot a heatmap. We provide the column side colors to help identify the treated samples (in blue) from the untreated samples (in grey).
+
+```{r clust_heat, }
+colors <- colorRampPalette( rev(brewer.pal(9, "PuOr")) )(255)
+sidecols <- c("grey","dodgerblue")[ ddsHTSeq$condition ]
+mat <- assay(ddsHTSeq)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+
+mat <- assay(ddsHTSeq)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(ddsHTSeq))
+pheatmap(mat, annotation_col=df)
+```
+
+
+We can now see blocks of genes which covary across patients. Note that a set of genes at the top of the heatmap are separating the N061011 cell line from the others. At the bottom of the heatmap, we see a set of genes for which the treated samples have higher gene expression.
+
+\newpage
+
+## Significant Genes
+
+Number of genes found to have significant differential expression:
+
+```{r}
+sigGenes=sum(res$padj < 0.1, na.rm=TRUE)
+sigGenes
+```
+
+We subset the results table to these genes and then sort it by the log2 fold change estimate to get the significant genes with the strongest down-regulation.
+```{r}
+resSig <- subset(res, padj < 0.1)
+head(resSig[ order( resSig$log2FoldChange ), ])
+```
+
+…and with the strongest upregulation. 
+```{r}
+# The order function gives the indices in increasing order, so a simple way to ask for decreasing order is to add a - sign. Alternatively, you can use the argument decreasing=TRUE.
+head(resSig[ order( -resSig$log2FoldChange ), ])
+```
+
+### Summary Table
+
+```{r write, }
+resOrdered <- res[order(res$padj),]
+resOrdered$Name=rownames(resOrdered)
+
+library(dplyr)
+resOrdered.Sig=data.frame(resOrdered[1:sigGenes ,])
+resOrdered.Sig=resOrdered.Sig[c(7,1:6)]
+resOrdered.Sig=left_join(resOrdered.Sig, tmp.countData, by="Name")
+resOrdered.Sig=left_join(resOrdered.Sig, day.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+resOrdered.Sig=left_join(resOrdered.Sig, night.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+resOrdered.Sig=left_join(resOrdered.Sig, annotation, by="Name")
+colnames(resOrdered.Sig)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
+
+write.table(as.data.frame(resOrdered.Sig), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
+
+library(knitr)
+resOrdered.Sig %>% 
+	select(c(1,3,7,20,21)) %>% 
+	kable(.)
+```
+
+\newpage
+### Plot
+```{r}
+ranked.sig.data=resOrdered.Sig %>%
+	arrange(padj,desc(abs(log2FoldChange))) %>% 
+	mutate(Rank=row_number(padj))
+
+ranked.sig.data %>% 
+	ggplot(aes(Rank,log2FoldChange)) +
+	xlab("Rank by adjusted p-values") +
+	ylab("Log2 Fold Change") +
+	geom_point() +
+	geom_text(aes(label=IMG_Source), vjust=-4)+
+	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
+	geom_hline(aes(yintercept=0), linetype=2,color="red") +
+	theme_minimal()
+```
+
+\newpage
+
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```
