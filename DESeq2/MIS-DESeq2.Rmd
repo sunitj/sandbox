@@ -3,25 +3,36 @@ title: "MIS-DESeq2"
 author: "Sunit Jain"
 date: "January 6, 2015"
 output:
-  pdf_document:
-    fig_crop: no
-    toc: yes
-    toc_depth: 3
   html_document:
     dev: svg
     toc: yes
     toc_depth: 3
+  pdf_document:
+    fig_crop: no
+    toc: yes
+    toc_depth: 3
 ---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+											echo=FALSE, warning=FALSE, message=FALSE)
+```
 
 \newpage
 
+## Disclaimer
+This particular work is just me exploring the DESeq2 workflow with our data and may not be scientifically accurate. The workflow is described [here](http://bioconductor.org/help/workflows/rnaseqGene/) as `SVN Revision: 105538`. Over the next few days I'll be improving and testing on this workflow.
+
+# DESeq2 Workflow for Middle Island Sinkholes
+
 ## Dependencies
-If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
+If you're unsure that you have all the pacakges required to run this workflow. Open the [`Rmd`](https://github.com/sunitj/sandbox/blob/master/DESeq2/MIS-DESeq2.Rmd) file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 
 ```{r install, eval=FALSE, results='hide',  echo=FALSE}
 package = function(p) {
   if (!p %in% installed.packages()){ 
-  		install.packages(p)
+  		install.packages(p, dep=T)
   }
 #	require(p, character.only=TRUE)
 }
@@ -33,11 +44,9 @@ package("knitr")
 package("vioplot")
 package("pheatmap")
 package("ggdendro")
-```
-
-```{r global_options, include=FALSE}
-knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
-											echo=FALSE, warning=FALSE, message=FALSE)
+package("dplyr")
+source("http://bioconductor.org/biocLite.R")
+biocLite(c("DESeq2","BiocParallel","sva"))
 ```
 
 ```{r setup,  echo=FALSE}
@@ -59,11 +68,16 @@ This command was run for each sample individually.
 
 ### Merging duplicate genes
 I performed a self blast and looked at results that had a percent identity greater than 98%, query coverage greater than 96% and a minimum alignment length of 500 bases. Once I had this subset, I screened out the hits to exons since we won't be considering them for this experiment anyway. I was left with the following two gene pairs:
+```{r}
+library(knitr)
+merge.genes=data.frame(
+a=c("scaffold_344578__MIS_1109813.1","scaffold_133898__MIS_10093600.14"),
+b=c("scaffold_219988__MIS_10179608.12" , "scaffold_555373__MIS_1172265.1")
+)
+kable(merge.genes, col.names = c("Query","Match"))
+```
 
-* scaffold_344578__MIS_1109813.1  scaffold_133898__MIS_10093600.14
-* scaffold_219988__MIS_10179608.12  scaffold_555373__MIS_1172265.1
-
-that had high enough similarity based on the thresholds mentioned above that their count data needed to be merged. The perl script `mergeCounts.pl` was run on each htseq-count output individually in order to accomplish this. Here is a sample command used for one of the htseq-count outputs:
+that had high enough similarity based on the thresholds mentioned above that their count data needed to be merged. The perl script [`mergeCounts.pl`]() was run on each htseq-count output individually in order to accomplish this. Here is a sample command used for one of the htseq-count outputs:
 
 `perl mergeCounts.pl -l realDuplicateGenes.list -tsv Day_1.htseqCount.tsv -o Day_1.htseqCount.merged.tsv`
 
@@ -476,8 +490,9 @@ m <- ncol(dds)
 p <- 2
 abline(h=qf(.99, p, m - p))
 ```
--->
+
 \newpage
+-->
 
 ## Diagnostic Plots
 

@@ -15,24 +15,21 @@ output:
 
 \newpage
 
-## Dependencies
-If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
-
-```{r install, eval=FALSE, results='hide',  echo=FALSE}
+```{r dependencies, eval=FALSE, results='hide',  echo=FALSE}
+#If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 package = function(p) {
   if (!p %in% installed.packages()){ 
-  		install.packages(p)
+  		install.packages(p, dep,T)
   }
-#	require(p, character.only=TRUE)
 }
 package("gplots")
 package("RColorBrewer")
-package("PoiClaClu")
+package("vioplot")
 package("ggplot2")
 package("knitr")
-package("vioplot")
-package("pheatmap")
-package("ggdendro")
+package("dplyr")
+source("http://bioconductor.org/biocLite.R")
+biocLite(c("DESeq2","BiocParallel","sva"))
 ```
 
 ```{r global_options, include=FALSE}
@@ -42,7 +39,6 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
 
 ```{r setup,  echo=FALSE}
 ## Setup
-library("DESeq2")
 workdir=getwd()
 dataDir=paste(getwd(),"data", sep = "/")
 gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
@@ -85,6 +81,7 @@ sampleTable=data.frame(sampleName = sampleName, fileName=sampleFiles, condition=
 ### Import Counts into DESeq2
 Once we were satisfied with the genes and their counts. We imported the count data into DESeq2.
 ```{r deseq, cache=TRUE}
+library("DESeq2")
 ddsHTSeq.all=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
 colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=c("Night","Day"))
 ```
@@ -107,8 +104,6 @@ colSums(counts(ddsHTSeq))
 colSums(counts(ddsHTSeq.all))-colSums(counts(ddsHTSeq))
 ```
 This reduces the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
-
-\newpage
 
 ## Counts
 
@@ -155,9 +150,6 @@ day.counts.ordered = countData %>%
 
 ```{r night_rank}
 ### Night Counts
-library("tidyr")
-library("dplyr")
-
 night.counts.ordered = countData %>% 
 	select(starts_with("Night")) %>% 
 	mutate(Name=rownames(.)) %>% 
@@ -170,6 +162,7 @@ night.counts.ordered = countData %>%
 
 ### Day vs Night
 ```{r d_vs_n_rank}
+library(ggplot2)
 day.counts.ordered$Sample="Day"
 night.counts.ordered$Sample="Night"
 #combined.counts=rbind(day.counts.ordered,night.counts.ordered)
@@ -182,13 +175,13 @@ combined.counts$Name= as.factor(combined.counts$Name)
 combined.counts$Sample= as.factor(combined.counts$Sample)
 
 ggplot(combined.counts, aes(RankByMean,Mean, color=Sample)) +
-  geom_line(aes(group=Name)) + 
+#  geom_line(aes(group=Name)) + 
 	geom_point(aes(order=RankByName)) +
 	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
-#	xlim(1,topN) +
+	xlim(1,topN) +
   scale_y_log10() +
 	scale_color_brewer(palette = "Dark2") +
-  ylab("log10 Average Counts")+
+  ylab("log10 Mean Counts")+
   xlab("Combined Top Genes")+
 	theme_minimal()
 ```
@@ -228,7 +221,7 @@ write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=F
 Differential expression was calculater using the DESeq2 wrapper function over 4 processors.
 
 ```{r deseq_wrapper,  }
-library("BiocParallel")
+library(BiocParallel)
 register(MulticoreParam(4))
 
 dat <- counts(dds, normalized=TRUE)
@@ -266,34 +259,6 @@ hist(res$pvalue[res$baseMean > 1], breaks=20, col="grey50", border="white")
 
 \newpage
 
-## Gene clustering
-
-In the sample distance heatmap made previously, the dendrogram at the side shows us a hierarchical clustering of the samples. Such a clustering can also be performed for the genes. Since the clustering is only relevant for genes that actually carry signal, one usually carries it out only for a subset of most highly variable genes. Here, for demonstration, let us select the 20 genes with the highest variance across samples. We will work with the rlog transformed counts:
-
-```{r geneFilter, }
-library("genefilter")
-topVarGenes <- head(order(-rowVars(assay(ddsHTSeq))),20)
-```
-
-The heatmap becomes more interesting if we do not look at absolute expression strength but rather at the amount by which each gene deviates in a specific sample from the gene's average across all samples. Hence, we center each genes' values across samples, and plot a heatmap. We provide the column side colors to help identify the treated samples (in blue) from the untreated samples (in grey).
-
-```{r clust_heat, }
-colors <- colorRampPalette( rev(brewer.pal(9, "PuOr")) )(255)
-sidecols <- c("grey","dodgerblue")[ ddsHTSeq$condition ]
-mat <- assay(ddsHTSeq)[ topVarGenes, ]
-mat <- mat - rowMeans(mat)
-
-mat <- assay(ddsHTSeq)[ topVarGenes, ]
-mat <- mat - rowMeans(mat)
-df <- as.data.frame(colData(ddsHTSeq))
-pheatmap(mat, annotation_col=df)
-```
-
-
-We can now see blocks of genes which covary across patients. Note that a set of genes at the top of the heatmap are separating the N061011 cell line from the others. At the bottom of the heatmap, we see a set of genes for which the treated samples have higher gene expression.
-
-\newpage
-
 ## Significant Genes
 
 Number of genes found to have significant differential expression:
@@ -314,6 +279,8 @@ head(resSig[ order( resSig$log2FoldChange ), ])
 # The order function gives the indices in increasing order, so a simple way to ask for decreasing order is to add a - sign. Alternatively, you can use the argument decreasing=TRUE.
 head(resSig[ order( -resSig$log2FoldChange ), ])
 ```
+
+\newpage
 
 ### Summary Table
 
@@ -339,7 +306,7 @@ resOrdered.Sig %>%
 ```
 
 \newpage
-### Plot
+### Log2Fold vs Rank(p-value adjusted) Plot
 ```{r}
 ranked.sig.data=resOrdered.Sig %>%
 	arrange(padj,desc(abs(log2FoldChange))) %>% 
@@ -358,6 +325,12 @@ ranked.sig.data %>%
 
 \newpage
 
+### Volcano (log10(padj) vs log2FoldChange)
+
+```{r}
+plot(-log10(padj) ~ log2FoldChange, as.data.frame(res), pch=20)
+```
+\newpage
 ## Session Info
 
 ```{r session_info}
