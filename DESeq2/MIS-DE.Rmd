@@ -3,23 +3,23 @@ title: "MIS-DESeq2"
 author: "Sunit Jain"
 date: "January 6, 2015"
 output:
-  pdf_document:
-    fig_crop: no
-    toc: yes
-    toc_depth: 3
   html_document:
     dev: svg
     toc: yes
     toc_depth: 3
+  pdf_document:
+    fig_crop: no
+    toc: yes
+    toc_depth: 3
 ---
 
-\newpage
+
 
 ```{r dependencies, eval=FALSE, results='hide',  echo=FALSE}
 #If you're unsure that you have all the pacakges required to run this workflow. Open the `Rmd` file in your favorite text editor (I used [RStudio](http://www.rstudio.com)) and change the next line from `eval=FALSE` to `eval=TRUE`. Now, when you run this workflow, the dependencies should be installed first.
 package = function(p) {
   if (!p %in% installed.packages()){ 
-  		install.packages(p, dep,T)
+  		install.packages(p, dep=T)
   }
 }
 package("gplots")
@@ -28,6 +28,8 @@ package("vioplot")
 package("ggplot2")
 package("knitr")
 package("dplyr")
+package("tidyr")
+package("readxl")
 source("http://bioconductor.org/biocLite.R")
 biocLite(c("DESeq2","BiocParallel","sva"))
 ```
@@ -39,6 +41,7 @@ knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
 
 ```{r setup,  echo=FALSE}
 ## Setup
+library(knitr)
 workdir=getwd()
 dataDir=paste(getwd(),"data", sep = "/")
 gffFile=list.files(path=dataDir, pattern="*.gff", full.names=TRUE)
@@ -72,6 +75,7 @@ sampleFiles=list.files(path=dataDir,pattern="*.htseqCount.merged.tsv", full.name
 ```
 
 ```{r conditions, }
+library(DESeq2)
 ### Set Conditions
 sampleCondition=c(rep("Day",3),rep("Night",3))
 sampleName=c("Day_1","Day_2","Day_3", "Night_4", "Night_5", "Night_6")
@@ -81,7 +85,6 @@ sampleTable=data.frame(sampleName = sampleName, fileName=sampleFiles, condition=
 ### Import Counts into DESeq2
 Once we were satisfied with the genes and their counts. We imported the count data into DESeq2.
 ```{r deseq, cache=TRUE}
-library("DESeq2")
 ddsHTSeq.all=DESeqDataSetFromHTSeqCount(sampleTable=sampleTable,design= ~ condition)
 colData(ddsHTSeq.all)$condition<-factor(colData(ddsHTSeq.all)$condition, levels=c("Night","Day"))
 ```
@@ -92,43 +95,154 @@ colSums(counts(ddsHTSeq.all))
 ```
 
 ### Filtering the data
-Get rid of genes which did not occur frequently enough. Here we say, lets get rid of genes with counts >=`r minRawCount` in at least 2 samples.
+Get rid of genes which were not expressed in at least two samples. In other words, only keep genes with raw counts >=`r minRawCount` in at least two samples.
 ```{r dim}
 keep=rowSums(counts(ddsHTSeq.all)>=minRawCount) >= 2
 ddsHTSeq=ddsHTSeq.all[keep ,]
 colSums(counts(ddsHTSeq))
 ```
 
-### How many reads were removed when Min Raw Count = `r minRawCount`?
+### How many reads were removed?
 ```{r difference}
 colSums(counts(ddsHTSeq.all))-colSums(counts(ddsHTSeq))
 ```
-This reduces the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
 
-## Counts
+### How many genes were removed?
+This reduced the dataset from `r dim(counts(ddsHTSeq.all))[1]` tags to about `r dim(counts(ddsHTSeq))[1]`. For the filtered tags, there is very little power to detect differential expression, so little information is lost by filtering. 
+
+## Normalization
+
+```{r reads_per_scaffold}
+library(dplyr)
+library(tidyr)
+raw.counts=counts(ddsHTSeq.all) %>%
+	as.data.frame(.) %>% 
+	mutate(Gene=rownames(.), Genes=Gene) %>%
+	separate(Gene, c("Scaffolds", "Locus"), sep="__") %>% 
+	dplyr::select(Scaffolds, Genes, starts_with("Day"), starts_with("Night"))
+
+rc.scaff=raw.counts %>% 
+	group_by(Scaffolds) %>% 
+	summarise_each(funs(sum), matches("_"))
+```
+
+### By Bin Coverage
+$$ {Normalized Count}= \frac{\left( \frac{Gene Read Count}{Bin Read Count} \right)}{Bin Coverage} $$
+```{r get_bins}
+library(readxl)
+scaff.bins=read_excel("data/Flux Binning Contig List (sunit).xlsx", sheet = 1) %>% dplyr::select(1:3)
+scaff.bins$Bin=as.factor(scaff.bins$Bin)
+colnames(scaff.bins)[1]=c("Scaffolds")
+bin.summary.num=scaff.bins %>%
+	group_by(Bin) %>%
+#	summarise(BinLen=sum(Length),MedianLen=median(Length), MeanLen=mean(Length), MinLen=min(Length), MaxLen=max(Length))
+	summarise(Bin.Len=sum(Length))
+bin.summary.num$Bin=as.character(bin.summary.num$Bin)
+```
+
+```{r bincov}
+# Server Path: /geomicro/data21/MIS/gDNA/2012/Transfer
+library(readr)
+bin.cov=read_tsv("data/binCov.tsv") %>% select(-`DB-presence`)
+colnames(bin.cov)=c("Bin", "Day_1", "Day_2", "Day_3", "Night_4", "Night_5", "Night_6")
+```
+
+```{r binSummary}
+bin.desc=read_excel("data/Flux Binning Contig List (sunit).xlsx", sheet = 2) %>% dplyr::select(-7)
+bin.desc$Domain=as.factor(bin.desc$Domain)
+bin.desc$Phylum=as.factor(bin.desc$Phylum)
+bin.desc$Class=as.factor(bin.desc$Class)
+bin.desc$Order=as.factor(bin.desc$Order)
+colnames(bin.desc)[6]=c("Genus.Species")
+bin.desc$Genus.Species=as.factor(bin.desc$Genus.Species)
+
+bin.summary=inner_join(bin.desc,bin.summary.num, by="Bin")
+#rm(list=c("bin.summary.num", "bin.desc"))
+#kable(head(bin.summary))
+```
+
+#### Cyanobacteria
+```{r cyanos}
+cyanos=bin.summary %>% filter(Phylum=="Cyanobacteria")
+#kable(cyanos)
+
+cyano.scaffolds=inner_join(cyanos,scaff.bins, by="Bin") %>% dplyr::select(Bin,Scaffolds)
+all.bin.reads=inner_join(scaff.bins,rc.scaff, by="Scaffolds") %>% 
+	group_by(Bin) %>% 
+	summarise_each(funs(sum), matches("_"))
+
+cyano.bin.reads=inner_join(cyanos, all.bin.reads, by="Bin") %>% 
+	group_by(Bin) %>% 
+	mutate(Day.Total.Reads=sum(Day_1, Day_2, Day_3),
+				 Night.Total.Reads=sum(Night_4, Night_5, Night_6),
+				 Total.Reads=sum(Day.Total.Reads,Night.Total.Reads)) %>% 
+	select(-matches("_"))
+
+cyano.bins=inner_join(cyano.bin.reads, bin.cov, by="Bin") %>% 
+	group_by(Bin) %>% 
+	mutate(Day.Avg.Cov=mean(Day_1, Day_2, Day_3),
+				 Night.Avg.Cov=mean(Night_4, Night_5, Night_6),
+				 Avg.Cov=mean(Day.Avg.Cov,Night.Avg.Cov)) %>% 
+	select(-matches("_")) %>% 
+	ungroup() %>% 
+	arrange(desc(Bin.Len))
+
+kable(cyano.bins)
+```
+
+
+```{r bin_normalization}
+# 1. df= raw.counts + all.bin.reads + bin.coverage
+## Add bin info to raw.counts
+countData=inner_join(raw.counts,scaff.bins, by="Scaffolds") %>% 
+	inner_join(., all.bin.reads, by="Bin") %>% 
+	inner_join(.,bin.cov, by="Bin") %>% 
+	mutate(n.Day1=((Day_1.x/Day_1.y)/Day_1),
+				 n.Day2=((Day_2.x/Day_2.y)/Day_2),
+				 n.Day3=((Day_3.x/Day_3.y)/Day_3),
+				 n.Night4=((Night_4.x/Night_4.y)/Night_4),
+				 n.Night5=((Night_5.x/Night_5.y)/Night_5),
+				 n.Night6=((Night_6.x/Night_6.y)/Night_6)
+				 ) %>% 
+	select(Genes,starts_with("n.")) %>% 
+	replace(is.na(.),0) %>% 
+	mutate(Total=sum(n.Day1,n.Day2,n.Day3,
+									 n.Night4,n.Night4,n.Night6))
+rownames(countData)=countData$Genes
+countData=select(countData, -Genes, -Total)
+colnames(countData)=c("Day_1","Day_2", "Day_3", "Night_4", "Night_5", "Night_6")
+colSums(countData)
+```
+```{r}
+vplot = function(df=countData, title="Violin Plots for Normalized Counts"){
+	library("vioplot")
+	vioplot(df$Day_1,df$Day_2, df$Day_3, df$Night_4, df$Night_5, df$Night_6,
+	        col="gold",
+	        names=colnames(df)
+					)
+	title(title)	
+}
+vplot(countData, "Violin Plot for Bin Normalized Counts")
+```
+
+### By relative library size.
 
 In order to normalise the raw counts we will start by determining the relative library sizes, or size factors for each library. For example, if the counts of the expressed genes in one sample are, on average, twice as high as in another, the size factor for the first sample should be twice as large as the one for the other sample. These size factors can be obtained with the function `estimateSizeFactors`:
 
-```{r counts, }
+```{r counts}
 dds=estimateSizeFactors(ddsHTSeq)
 sizeFactors(dds)
 ```
 
 ### Normalized Counts
 
-```{r counts_norm, }
+```{r counts_norm}
 library("vioplot")
 dds.ncounts=counts(dds, normalized=TRUE)
 head(dds.ncounts)
-countData=data.frame(dds.ncounts)
-vioplot(countData$Day_1,countData$Day_2, countData$Day_3, countData$Night_4, countData$Night_5, countData$Night_6,
-        col="gold",
-        names=colnames(countData))
-title("Violin Plots for Normalized Counts")
-summary(countData)
+#countData=data.frame(dds.ncounts)
+#vplot()
 ```
-
-\newpage
 
 ## Rank Abundance
 Plotting Rank Abundance for top `r topN` genes.
@@ -144,7 +258,9 @@ day.counts.ordered = countData %>%
   gather(ToD, Counts, -Name) %>%
   group_by(Name) %>%
   summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
-	top_n(topN, Mean) %>% 
+	replace(is.na(.),0) %>% 
+	ungroup() %>% 
+	top_n(topN, Mean) %>%
 	mutate(Rank=min_rank(desc(Mean)))
 ```
 
@@ -156,6 +272,8 @@ night.counts.ordered = countData %>%
   gather(ToD, Counts, -Name) %>%
   group_by(Name) %>%
   summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
+	replace(is.na(.),0) %>% 
+	ungroup() %>% 
 	top_n(topN, Mean) %>% 
 	mutate(Rank=min_rank(desc(Mean)))
 ```
@@ -174,12 +292,12 @@ combined.counts=bind_rows(list(day.counts.ordered,night.counts.ordered)) %>%
 combined.counts$Name= as.factor(combined.counts$Name)
 combined.counts$Sample= as.factor(combined.counts$Sample)
 
-ggplot(combined.counts, aes(RankByMean,Mean, color=Sample)) +
+ggplot(na.omit(combined.counts), aes(RankByMean,Mean, color=Sample)) +
 #  geom_line(aes(group=Name)) + 
 	geom_point(aes(order=RankByName)) +
 	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
 	xlim(1,topN) +
-  scale_y_log10() +
+#  scale_y_log10() +
 	scale_color_brewer(palette = "Dark2") +
   ylab("log10 Mean Counts")+
   xlab("Combined Top Genes")+
@@ -213,7 +331,7 @@ combined.anno=left_join(combined.union, annotation, by="Name")
 write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE, na = "0");
 ```
 
-\newpage
+
 
 ## Differential Expression
 
@@ -247,7 +365,7 @@ res=resva
 dds=ddsva
 ```
 
-\newpage
+
 
 ### P-Value Histogram
 
@@ -257,7 +375,7 @@ Another useful diagnostic plot is the histogram of the p values.
 hist(res$pvalue[res$baseMean > 1], breaks=20, col="grey50", border="white")
 ```
 
-\newpage
+
 
 ## Significant Genes
 
@@ -280,7 +398,7 @@ head(resSig[ order( resSig$log2FoldChange ), ])
 head(resSig[ order( -resSig$log2FoldChange ), ])
 ```
 
-\newpage
+
 
 ### Summary Table
 
@@ -305,7 +423,7 @@ resOrdered.Sig %>%
 	kable(.)
 ```
 
-\newpage
+
 ### Log2Fold vs Rank(p-value adjusted) Plot
 ```{r}
 ranked.sig.data=resOrdered.Sig %>%
@@ -323,14 +441,12 @@ ranked.sig.data %>%
 	theme_minimal()
 ```
 
-\newpage
-
 ### Volcano (log10(padj) vs log2FoldChange)
 
 ```{r}
 plot(-log10(padj) ~ log2FoldChange, as.data.frame(res), pch=20)
 ```
-\newpage
+
 ## Session Info
 
 ```{r session_info}
