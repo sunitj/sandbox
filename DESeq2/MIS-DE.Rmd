@@ -133,9 +133,9 @@ library(readxl)
 scaff.bins=read_excel("data/Flux Binning Contig List (sunit).xlsx", sheet = 1) %>% dplyr::select(1:3)
 scaff.bins$Bin=as.factor(scaff.bins$Bin)
 colnames(scaff.bins)[1]=c("Scaffolds")
+scaff.bins=scaff.bins %>% filter(Bin != "Unclassified")
 bin.summary.num=scaff.bins %>%
 	group_by(Bin) %>%
-#	summarise(BinLen=sum(Length),MedianLen=median(Length), MeanLen=mean(Length), MinLen=min(Length), MaxLen=max(Length))
 	summarise(Bin.Len=sum(Length))
 bin.summary.num$Bin=as.character(bin.summary.num$Bin)
 ```
@@ -165,23 +165,35 @@ bin.summary=inner_join(bin.desc,bin.summary.num, by="Bin")
 reads.per.bin=inner_join(scaff.bins,rc.scaff, by="Scaffolds") %>% 
 	group_by(Bin) %>% 
 	summarise_each(funs(sum), matches("_"))
+
+trpb=reads.per.bin %>% group_by(Bin) %>% mutate(Total=sum(Day_1,Day_2,Day_3,Night_4,Night_5,Night_6)) %>% ungroup() %>% arrange(desc(Total))
+library(ggplot2)
+trpb$Bin=factor(trpb$Bin, levels = trpb$Bin)
+ggplot(trpb, aes(Bin,Total))+geom_bar(stat="identity")+ theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust=0.5))
+bins.of.interest=trpb %>% top_n(10,Total) %>% select(Bin)
 ```
 
 #### Cyanobacteria
 ```{r cyanos}
+bins.of.interest$Bin=as.character(bins.of.interest$Bin)
 cyanos=bin.summary %>% filter(Phylum=="Cyanobacteria")
+boi=data.frame(Bin=c(bins.of.interest$Bin, c("B20","B23","B27","B29","B57"), cyanos$Bin)) %>%
+	distinct() %>% 
+	left_join(.,bin.summary, by="Bin")
 #kable(cyanos)
 
-cyano.scaffolds=inner_join(cyanos,scaff.bins, by="Bin") %>% dplyr::select(Bin,Scaffolds)
-
-cyano.bin.reads=inner_join(cyanos, reads.per.bin, by="Bin") %>% 
+#cyano.scaffolds=inner_join(cyanos,scaff.bins, by="Bin") %>% dplyr::select(Bin,Scaffolds)
+boi.scaffolds=inner_join(boi,scaff.bins, by="Bin") %>% dplyr::select(Bin,Scaffolds)
+#cyano.bin.reads=inner_join(cyanos, reads.per.bin, by="Bin") %>% 
+boi.bin.reads=inner_join(boi, reads.per.bin, by="Bin") %>% 
 	group_by(Bin) %>% 
 	mutate(Day.Total.Reads=sum(Day_1, Day_2, Day_3),
 				 Night.Total.Reads=sum(Night_4, Night_5, Night_6),
 				 Total.Reads=sum(Day.Total.Reads,Night.Total.Reads)) %>% 
 	select(-matches("_"))
 
-cyano.bins=inner_join(cyano.bin.reads, bin.cov, by="Bin") %>% 
+#cyano.bins=inner_join(cyano.bin.reads, bin.cov, by="Bin") %>% 
+boi.bins=inner_join(boi.bin.reads, bin.cov, by="Bin") %>% 
 	group_by(Bin) %>% 
 	mutate(Day.Avg.Cov=mean(Day_1, Day_2, Day_3),
 				 Night.Avg.Cov=mean(Night_4, Night_5, Night_6),
@@ -190,7 +202,7 @@ cyano.bins=inner_join(cyano.bin.reads, bin.cov, by="Bin") %>%
 	ungroup() %>% 
 	arrange(desc(Bin.Len))
 
-kable(cyano.bins)
+kable(boi.bins, row.names=T)
 ```
 
 ```{r bin_normalization}
@@ -199,7 +211,7 @@ kable(cyano.bins)
 bin.norm.countData=inner_join(raw.counts,scaff.bins, by="Scaffolds") %>% 
 	inner_join(., reads.per.bin, by="Bin") %>% 
 	inner_join(.,bin.cov, by="Bin") %>% 
-	mutate(n.Day1=((Day_1.x/Day_1.y)/Day_1),
+	mutate(n.Day1=((Day_1.x/Day_1.y)/Day_1), # (raw counts/all bin reads)/bin coverage
 				 n.Day2=((Day_2.x/Day_2.y)/Day_2),
 				 n.Day3=((Day_3.x/Day_3.y)/Day_3),
 				 n.Night4=((Night_4.x/Night_4.y)/Night_4),
@@ -208,15 +220,15 @@ bin.norm.countData=inner_join(raw.counts,scaff.bins, by="Scaffolds") %>%
 				 ) %>% 
 	select(Genes,starts_with("n.")) %>% 
 	replace(is.na(.),0) %>% 
-	mutate(Total=sum(n.Day1,n.Day2,n.Day3,
-									 n.Night4,n.Night4,n.Night6))
+	mutate(Total=rowSums(.[2:7])) %>% 
+	arrange(desc(Total))
 
 rownames(bin.norm.countData)=bin.norm.countData$Genes
 bin.norm.countData=select(bin.norm.countData, -Genes, -Total)
 colnames(bin.norm.countData)=c("Day_1","Day_2", "Day_3", "Night_4", "Night_5", "Night_6")
 colSums(bin.norm.countData)
 
-head(bin.norm.countData)
+kable(head(bin.norm.countData))
 #bin.norm.countData=normalizationFactors(dds,)
 ```
 ```{r func_violin_plot}
@@ -266,7 +278,7 @@ grouped_counts=function(df=df,label=""){
 	  summarise(Totals=sum(Counts), Mean=mean(Counts), SE=sd(Counts)/sqrt(length(Counts))) %>%
 		ungroup() %>% 
 		top_n(topN, Mean) %>%
-		mutate(Rank=min_rank(desc(Mean)), Sample=label)
+		mutate(Rank=row_number(desc(Mean)), Sample=label)
 	
 	return(gc.df)
 }
@@ -283,41 +295,68 @@ day.counts.ordered = grouped_counts(df,"Day")
 night.counts.ordered = grouped_counts(df,"Night")
 
 ### Day vs Night
-combined.counts=bind_rows(list(day.counts.ordered,night.counts.ordered)) %>%
-	select(-Rank) %>% 
-  top_n(topN, Mean) %>% 
-	mutate(RankByMean=row_number(desc(Mean))) %>%
-	mutate(RankByName=min_rank(Name))
-combined.counts$Name= as.factor(combined.counts$Name)
-combined.counts$Sample= as.factor(combined.counts$Sample)
+# combined.counts=bind_rows(list(day.counts.ordered,night.counts.ordered)) %>%
+# 	select(-Rank) %>% 
+#   top_n(topN, Mean) %>% 
+# 	mutate(RankByMean=row_number(desc(Mean))) %>%
+# 	mutate(RankByName=min_rank(Name))
+# combined.counts$Name= as.factor(combined.counts$Name)
+# combined.counts$Sample= as.factor(combined.counts$Sample)
 
-### Plot
-library(ggplot2)
-my.plot=ggplot(na.omit(combined.counts), aes(RankByMean,Mean, color=Sample)) +
-#  geom_line(aes(group=Name)) + 
-	geom_point() +
-	geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE)) +
-	xlim(1,topN) +
-  scale_y_log10() +
-	scale_color_brewer(palette = "Dark2") +
-  ylab("log10 Mean Counts")+
-  xlab("Combined Top Genes")+
-	ggtitle(title) +
-	theme_minimal()
+my.plot=plot_rank_abundance(day.counts.ordered,night.counts.ordered,title)
 
-return(list(day=day.counts.ordered, night=night.counts.ordered, combined=combined.counts, plot=my.plot))
+#return(list(day=day.counts.ordered, night=night.counts.ordered, combined=combined.counts, plot=my.plot))
+return(list(day=day.counts.ordered, night=night.counts.ordered, plot=my.plot))
+}
+
+plot_rank_abundance = function(day=day.bin.norm,night=night.bin.norm,title=""){
+	day.counts.ordered=day %>% replace(is.na(.),0) %>% filter(Totals > 0)
+	night.counts.ordered=night %>% replace(is.na(.),0) %>% filter(Totals > 0)
+	### Plot
+	library(ggplot2)
+	#my.plot=ggplot(na.omit(combined.counts), aes(RankByMean,Mean, color=Sample)) +
+	my.plot=ggplot() +
+	#  geom_line(aes(group=Name)) + 
+		geom_point(data=day.counts.ordered, aes(Rank,Mean, color=Sample)) +
+		#geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE), data = day.counts.ordered) +
+		geom_point(data=night.counts.ordered, aes(Rank,Mean, color=Sample)) +
+		#geom_errorbar(aes(ymax=Mean+SE, ymin=Mean-SE), data = night.counts.ordered) +
+		xlim(1,topN) +
+	  scale_y_log10() +
+		scale_color_brewer(palette = "Dark2") +
+	  ylab("log10 Mean Counts")+
+	  xlab("Combined Top Genes")+
+		ggtitle(title) +
+		theme_minimal()
+	return(my.plot)
 }
 ```
+
+```{r}
+ day.bin.norm=grouped_counts(bin.norm.countData,"Day")
+# night.bin.norm=grouped_counts(bin.norm.countData,"Night")
+# 	day.counts.ordered=day.bin.norm %>% replace(is.na(.),0)
+# 	night.counts.ordered=na.omit(night.bin.norm) %>% replace(is.na(.),0)
+# 	### Plot
+# 	library(ggplot2)
+# 	ggplot() +
+# 		geom_point(data=day.counts.ordered, aes(Rank,Mean, color=Sample)) +
+# 		geom_point(data=night.counts.ordered, aes(Rank,Mean, color=Sample)) +
+# 		xlim(1,topN) +
+# 	  scale_y_log10() +
+# 		scale_color_brewer(palette = "Dark2") +
+# 	  ylab("log10 Mean Counts")+
+# 	  xlab("Combined Top Genes")+
+# 		ggtitle("Test") +
+# 		theme_minimal()
+```
+
 
 ```{r rank_abundance_plots}
 bin.norm.list=rank_abundance(bin.norm.countData, "Rank Abundance for Bin Coverage normalized counts")
 bin.norm.list$plot
 deseq.norm.list=rank_abundance(deseq.countData, "Rank Abundance for DESeq2 normalized counts")
 deseq.norm.list$plot
-
-
-bin.countData=inner_join(raw.counts,scaff.bins, by="Scaffolds") %>% 
-	filter(Bin %in% cyano.bins$Bin)
 ```
 
 
@@ -336,32 +375,31 @@ rank_abundance_by_bin= function(bin, title){
 					 ) %>% 
 		select(Genes,starts_with("n.")) %>% 
 		replace(is.na(.),0) %>% 
-		mutate(Total=sum(n.Day1,n.Day2,n.Day3,
-										 n.Night4,n.Night4,n.Night6))
+		mutate(Total=rowSums(.[2:7])) %>% 
+		arrange(desc(Total))
 	
 	rownames(my.bin.norm.countData)=my.bin.norm.countData$Genes
 	my.bin.norm.countData=select(my.bin.norm.countData, -Genes, -Total)
 	colnames(my.bin.norm.countData)=c("Day_1","Day_2", "Day_3", "Night_4", "Night_5", "Night_6")
 	colSums(my.bin.norm.countData)
 	
-	head(my.bin.norm.countData)
 	myObj=rank_abundance(my.bin.norm.countData,title)
 	return(myObj)
 }
 ```
 
 ### Rank Abundance by Bin
-The following are Rank Abundance plots by Cyano bins, normalized by Coverage as described in the formula above.
+The following are Rank Abundance plots by bins of interest, normalized by Coverage as described in the formula above.
 
 ```{r rank_abundance_by_binCov_all_cyanos}
-foreach.cyano.bin=cyano.bins %>% 
+foreach.boi=boi.bins %>% 
 	select(1:6) %>% 
 	unite("title",2:6, sep=" > ")
 
-bin.rank.abundance=apply(foreach.cyano.bin,1,function(x) rank_abundance_by_bin(x[1],paste(x[1],x[2], sep= " = ")))
+bin.rank.abundance=apply(foreach.boi,1,function(x) rank_abundance_by_bin(x[1],paste(x[1],x[2], sep= " = ")))
 
 # plots
-for(row.num in 1:length(foreach.cyano.bin$Bin)){
+for(row.num in 1:length(foreach.boi$Bin)){
 	print(bin.rank.abundance[[row.num]]$plot)
 }
 ```
@@ -373,7 +411,7 @@ colnames(annotation)=c("Name", "IMG_Product","IMG_Source")
 annotation$Name=as.character(annotation$Name)
 ```
 ```{r func_get_annotations}
-get_annotations= function(day,night,count.data){
+get_annotations= function(day,night,count.data=bin.norm.countData){
 	combined.union=data.frame()
 	combined.union=as.data.frame(union(day$Name,night$Name))
 	colnames(combined.union)="Name"
@@ -394,22 +432,19 @@ get_annotations= function(day,night,count.data){
 	
 	return(combined.anno)
 }
-
-bin.anno=lapply(bin.rank.abundance, function(x) get_annotations(x$day,x$night,bin.norm.countData))
-# write
-for(row.num in 1:length(bin.anno)){
-	filename=paste("data/",important.bins$Bin[row.num],"_combined_raw_counts.tsv")
-	write.table(bin.anno[[row.num]], file=filename,sep="\t", quote=FALSE, row.names = FALSE, na = "0");
-}
-
 ```
 
 ```{r write_counts}
-
-write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE, na = "0");
+# write
+for(row.num in 1:length(foreach.boi$Bin)){
+	bin.anno=data.frame()
+	bin.anno=get_annotations(bin.rank.abundance[[row.num]]$day,bin.rank.abundance[[row.num]]$night)
+	filename=paste("data/",foreach.boi$Bin[row.num],"_combined_raw_counts.tsv")
+	write.table(bin.anno, file=filename,sep="\t", quote=FALSE, row.names = FALSE, na = "0");
+	bin.anno=data.frame()
+}
+#write.table(combined.anno, file="data/combined_raw_counts.tsv",sep="\t", quote=FALSE, row.names = FALSE, na = "0");
 ```
-
--->
 
 ## Differential Expression
 
@@ -476,9 +511,6 @@ head(resSig[ order( resSig$log2FoldChange ), ])
 head(resSig[ order( -resSig$log2FoldChange ), ])
 ```
 
-
-<!-- dependent on day and night count data.
-
 ### Summary Table
 
 ```{r write, }
@@ -488,18 +520,18 @@ resOrdered$Name=rownames(resOrdered)
 library(dplyr)
 resOrdered.Sig=data.frame(resOrdered[1:sigGenes ,])
 resOrdered.Sig=resOrdered.Sig[c(7,1:6)]
-resOrdered.Sig=left_join(resOrdered.Sig, tmp.countData, by="Name")
-resOrdered.Sig=left_join(resOrdered.Sig, day.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
-resOrdered.Sig=left_join(resOrdered.Sig, night.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
-resOrdered.Sig=left_join(resOrdered.Sig, annotation, by="Name")
-colnames(resOrdered.Sig)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
-
-write.table(as.data.frame(resOrdered.Sig), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
-
-library(knitr)
-resOrdered.Sig %>% 
-	select(c(1,3,7,20,21)) %>% 
-	kable(.)
+# resOrdered.Sig=left_join(resOrdered.Sig, tmp.countData, by="Name")
+# resOrdered.Sig=left_join(resOrdered.Sig, day.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+# resOrdered.Sig=left_join(resOrdered.Sig, night.counts.ordered, by="Name") %>% select(-c(Rank,Sample))
+# resOrdered.Sig=left_join(resOrdered.Sig, annotation, by="Name")
+# colnames(resOrdered.Sig)[14:19]=c("Day_Total", "Day_Mean", "Day_SE", "Night_Total", "Night_Mean", "Night_SE")
+# 
+# write.table(as.data.frame(resOrdered.Sig), sep="\t",file="data/results.tsv", quote = FALSE, row.names =FALSE)
+# 
+# library(knitr)
+# resOrdered.Sig %>% 
+# 	select(c(1,3,7,20,21)) %>% 
+# 	kable(.)
 ```
 
 
@@ -509,18 +541,16 @@ ranked.sig.data=resOrdered.Sig %>%
 	arrange(padj,desc(abs(log2FoldChange))) %>% 
 	mutate(Rank=row_number(padj))
 
-ranked.sig.data %>% 
-	ggplot(aes(Rank,log2FoldChange)) +
-	xlab("Rank by adjusted p-values") +
-	ylab("Log2 Fold Change") +
-	geom_point() +
-	geom_text(aes(label=IMG_Source), vjust=-4)+
-	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
-	geom_hline(aes(yintercept=0), linetype=2,color="red") +
-	theme_minimal()
+# ranked.sig.data %>% 
+# 	ggplot(aes(Rank,log2FoldChange)) +
+# 	xlab("Rank by adjusted p-values") +
+# 	ylab("Log2 Fold Change") +
+# 	geom_point() +
+# 	geom_text(aes(label=IMG_Source), vjust=-4)+
+# 	geom_errorbar(aes(ymax=log2FoldChange+lfcSE, ymin=log2FoldChange-lfcSE)) +
+# 	geom_hline(aes(yintercept=0), linetype=2,color="red") +
+# 	theme_minimal()
 ```
-
--->
 
 ### Volcano (log10(padj) vs log2FoldChange)
 
