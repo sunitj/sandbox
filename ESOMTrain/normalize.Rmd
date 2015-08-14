@@ -1,0 +1,93 @@
+---
+title: "Trying out different ESOM Normalizations"
+author: "Sunit Jain"
+date: "August 14, 2015"
+output: html_document
+---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+											echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r sanity}
+# !/usr/bin/R
+
+# Read the ESOM lrn file and normalize
+args = commandArgs(trailingOnly = TRUE)
+lrnFile = args[1]
+
+# Sanity Checks
+if (lrnFile == "" || is.na(lrnFile) || toupper(lrnFile)=="TEST") lrnFile="data/test.lrn"
+if (!file.exists(lrnFile)){
+	print(paste("[",lrnFile,"] not found! Exiting...", sep = " "))
+	quit(status = 1)
+}
+```
+
+```{r read}
+# Read the lrn file
+library(readr)
+library(dplyr)
+lrn=read_tsv(lrnFile,skip = 3,col_names = T)
+colnames(lrn)[1]=c("Key")
+row.names(lrn)=lrn$Key
+lrn=lrn %>% select(-Key)
+```
+```{r normalize}
+# Normalize
+mad_rzt = function(x){
+	x=unlist(x)
+	Median=median(x,na.rm = T)
+	Mad=mad(x,na.rm = T, constant = 1)
+	rzt=(x-Median)/Mad
+	return(rzt)
+}
+zt = function(x){
+	x=unlist(x)
+	Mean=mean(x)
+	SD=sd(x)
+
+	zt=(x-Mean)/SD
+	return(zt)
+}
+
+zt.lrn=mad.lrn=lrn
+mad.lrn[]=lapply(mad.lrn,FUN= function(x) mad_rzt(x))
+zt.lrn[]=lapply(zt.lrn,FUN= function(x) zt(x))
+```
+```{r deseq_norm, eval=FALSE}
+library(DESeq2)
+rlog.lrn=rlog(as.matrix(ceiling(lrn*1e7)))
+rlog.lrn=as.data.frame(rlog.lrn)
+```
+
+```{r read_esom_rzr, cache=TRUE}
+# Compare with ESOM-RZT
+esom.rzt.lrnFile="data/esom.rzt.lrn"
+esom.rzt.lrn=read_tsv(esom.rzt.lrnFile,skip=3,col_names = T)
+colnames(esom.rzt.lrn)[1]=c("Key")
+row.names(esom.rzt.lrn)=esom.rzt.lrn$Key
+esom.rzt.lrn=select(esom.rzt.lrn,-Key)
+```
+
+# Plots
+(x-Median)/MAD = Green
+(x-Mean)/SD = Yellow
+No Norm = Red
+ESOM RZT norm = Blue
+```{r plot}
+library(ggplot2)
+for(col.num in seq(1:length(lrn))){
+	kmer=aes_string(x=colnames(lrn[col.num]))
+	p=ggplot() +
+		geom_freqpoly(data=mad.lrn, kmer, color="green") +
+		geom_freqpoly(data=lrn, kmer, color="red") +
+		geom_freqpoly(data=esom.rzt.lrn, kmer, color="blue") +
+		geom_freqpoly(data=zt.lrn, kmer, color="yellow")+
+		ggtitle("|| No Norm = Red || ESOM RZT norm = Blue || (x-Mean)/SD = Yellow || (x-Median)/MAD = Green || ") +
+		theme_minimal()
+
+	print(p)
+	p=list()
+}
+```
