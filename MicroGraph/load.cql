@@ -14,10 +14,10 @@ CREATE INDEX ON :Gene(ncbi_accession);
 USING PERIODIC COMMIT
 LOAD CSV FROM
 {AKAFILE} AS line FIELDTERMINATOR '\t'
-
+WITH line, SPLIT(line[3], "__") AS ncbi
 CREATE (gene:Gene {name: line[1]})
 SET gene.description = line[2],
-  gene.ncbi_accession = line[3],
+  gene.ncbi_accession = ncbi[0],
   gene.annotation = line[4],
   gene.xref = line[5]
 
